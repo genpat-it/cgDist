@@ -1,0 +1,9 @@
+profiles = "/home/IZSNT/a.deruvo/cgdist-resources/paper/listeria_beone/profiles/results_20250424T094954/results_alleles_hashed.tsv"
+schema = "/home/IZSNT/a.deruvo/cgdist-resources/paper/listeria_beone/schema/"
+output = "listeria_test_snps_indel_events.tsv"
+threads = 128
+mode = "snps-indel-events"
+cache_file = "listeria.lz4"
+cache_note = "my listeria cache"
+alignment_mode = "dna-strict"
+hashery_type = "crc32"

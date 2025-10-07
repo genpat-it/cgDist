@@ -1,0 +1,6 @@
+*.tsv
+*.lz4
+*.txt
+target/
+.claude
+CLAUDE.md
