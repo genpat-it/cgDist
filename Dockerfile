@@ -54,9 +54,11 @@ CMD ["--help"]
 
 # Metadata
 LABEL maintainer="andrea.deruvo@gssi.it"
-LABEL description="cgdist: Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis"
-LABEL version="1.0.0"
-LABEL org.opencontainers.image.title="cgdist"
+LABEL description="cgDist: Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis"
+LABEL version="0.1.0"
+LABEL org.opencontainers.image.title="cgDist"
 LABEL org.opencontainers.image.description="High-performance tool for calculating pairwise SNP and indel distances between bacterial isolates using core genome MLST allelic profiles with sequence alignment"
-LABEL org.opencontainers.image.vendor="Bioinformatics Laboratory"
+LABEL org.opencontainers.image.vendor="GenPat-IT Bioinformatics"
 LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.source="https://github.com/genpat-it/cgDist"
+LABEL org.opencontainers.image.documentation="https://github.com/genpat-it/cgDist"
