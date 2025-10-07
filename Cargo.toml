@@ -3,7 +3,17 @@ name = "cgdist"
 version = "0.1.0"
 edition = "2021"
 description = "Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis"
-authors = ["Andrea de Ruvo <andrea.deruvo@gssi.it>", "Pierluigi Castelli <p.castelli@izs.it>", "Andrea Bucciacchio <a.bucciacchio@izs.it>"]
+authors = [
+    "Andrea de Ruvo <andrea.deruvo@gssi.it>",
+    "Pierluigi Castelli <p.castelli@izs.it>",
+    "Andrea Bucciacchio <a.bucciacchio@izs.it>",
+    "Iolanda Mangone <i.mangone@izs.it>",
+    "Verónica Mixão <veronica.mixao@insa.min-saude.pt>",
+    "Vítor Borges <vitor.borges@insa.min-saude.pt>",
+    "Michele Flammini <michele.flammini@gssi.it>",
+    "Nicolas Radomski <n.radomski@izs.it>",
+    "Adriano Di Pasquale <a.dipasquale@izs.it>"
+]
 license = "MIT"
 repository = "https://github.com/genpat-it/cgDist"
 keywords = ["bioinformatics", "genomics", "mlst", "alignment", "distance"]
