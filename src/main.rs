@@ -1007,7 +1007,7 @@ fn print_modern_cache_info(cache: &ModernCache, compressed: &[u8]) {
 fn print_legacy_cache_info(_cache: &LegacyCache, compressed: &[u8]) {
     println!("⚠️  Legacy cache format detected");
     println!();
-    
+
     // We can't easily introspect the legacy format without defining all structures
     // Just show basic info
     println!("=== STORAGE INFO ===");
