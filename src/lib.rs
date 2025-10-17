@@ -32,7 +32,7 @@
 //! )?;
 //!
 //! // Calculate distances
-//! let engine = DistanceEngine::new(AlignmentConfig::default());
+//! let engine = DistanceEngine::new(AlignmentConfig::default(), "crc32".to_string());
 //! let distances = calculate_distance_matrix(
 //!     &matrix.samples,
 //!     &matrix.loci_names,
