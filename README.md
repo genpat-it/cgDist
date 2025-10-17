@@ -571,14 +571,19 @@ distances = pd.read_csv('distances.tsv', sep='\t')
 
 ## 📜 Citation
 
-If you use cgDist in your research, please cite:
+If you use cgDist in your research, please cite our preprint:
+
+**de Ruvo, A.; Castelli, P.; Bucciacchio, A.; Mangone, I.; Mixao, V.; Borges, V.; Radomski, N.; Di Pasquale, A.** (2025). *cgDist: An Enhanced Algorithm for Efficient Calculation of pairwise SNP and InDel differences from Core Genome Multilocus Sequence Typing*. bioRxiv. DOI: [10.1101/2025.10.16.682749](https://doi.org/10.1101/2025.10.16.682749)
 
 ```bibtex
 @article{deruvo2025cgdist,
-  title = {cgDist: Enhanced Resolution for Bacterial Genomic Surveillance Through Nucleotide-Level Distance Calculation from cgMLST Profiles},
-  author = {De Ruvo, Andrea and Castelli, Pierluigi and Bucciacchio, Andrea and Mangone, Iolanda and Mixão, Verónica and Borges, Vítor and Flammini, Michele and Radomski, Nicolas and Di Pasquale, Adriano},
+  title = {cgDist: An Enhanced Algorithm for Efficient Calculation of pairwise SNP and InDel differences from Core Genome Multilocus Sequence Typing},
+  author = {de Ruvo, Andrea and Castelli, Pierluigi and Bucciacchio, Andrea and Mangone, Iolanda and Mixao, Verónica and Borges, Vítor and Radomski, Nicolas and Di Pasquale, Adriano},
   year = {2025},
-  note = {Preprint. Software: https://github.com/genpat-it/cgDist, Data: https://doi.org/10.5281/zenodo.17285518}
+  month = {October},
+  doi = {10.1101/2025.10.16.682749},
+  journal = {bioRxiv},
+  note = {Preprint. Software: https://github.com/genpat-it/cgDist}
 }
 ```
 
