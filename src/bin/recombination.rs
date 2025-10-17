@@ -250,7 +250,7 @@ fn calculate_hamming_distance_matrix_parallel(
 }
 
 fn save_hamming_matrix(
-    samples: &[String],
+    _samples: &[String],
     sample_profiles: &HashMap<String, HashMap<String, String>>,
     efsa_loci: &HashSet<String>,
     missing_char: &str,

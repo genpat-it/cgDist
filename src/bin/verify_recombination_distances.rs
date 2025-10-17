@@ -24,7 +24,7 @@ fn load_distance_matrix(file_path: &str) -> Result<HashMap<(String, String), u32
     let mut matrix = HashMap::new();
     
     // Read matrix data
-    for (row_idx, line) in lines.enumerate() {
+    for (_row_idx, line) in lines.enumerate() {
         let line = line?;
         let distances: Vec<&str> = line.split('\t').collect();
         
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut verified_count = 0;
     let mut snp_mismatches = 0;
     let mut indel_mismatches = 0;
-    let mut missing_in_matrix = 0;
+    let missing_in_matrix = 0;
     
     // Sample events evenly across the list
     let step = if events.len() > sample_size { events.len() / sample_size } else { 1 };
