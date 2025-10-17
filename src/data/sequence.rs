@@ -37,7 +37,7 @@ impl SequenceDatabase {
     /// Add a sequence to the database
     pub fn add_sequence(&mut self, locus: String, crc: u32, sequence_info: SequenceInfo) {
         self.loci.entry(locus)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(crc, sequence_info);
         self.total_sequences += 1;
     }
@@ -108,7 +108,7 @@ impl SequenceDatabase {
         // Collect all required CRCs per locus
         let mut required_crcs: HashMap<String, HashSet<u32>> = HashMap::new();
         for (locus, crc1, crc2) in unique_pairs {
-            let entry = required_crcs.entry(locus.clone()).or_insert_with(HashSet::new);
+            let entry = required_crcs.entry(locus.clone()).or_default();
             entry.insert(*crc1);
             entry.insert(*crc2);
         }

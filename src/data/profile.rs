@@ -28,6 +28,12 @@ pub struct AllelicMatrix {
     pub loci_names: Vec<String>,
 }
 
+impl Default for AllelicMatrix {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AllelicMatrix {
     /// Create a new empty matrix
     pub fn new() -> Self {
@@ -38,6 +44,7 @@ impl AllelicMatrix {
     }
 
     /// Load matrix from file with specified hasher
+    #[allow(clippy::too_many_arguments)]
     pub fn from_file_with_hasher(
         file_path: &std::path::Path,
         missing_char: &str,

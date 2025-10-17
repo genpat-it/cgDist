@@ -305,7 +305,7 @@ impl DistanceEngine {
             return Err("Cache file too small".to_string());
         }
         
-        let uncompressed_size = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+        let _uncompressed_size = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
         
         // Quick string search in compressed data for alignment config patterns
         let buffer_str = String::from_utf8_lossy(&buffer);
@@ -422,6 +422,7 @@ impl DistanceEngine {
             
             // Define legacy structure inline
             #[derive(Deserialize)]
+            #[allow(clippy::type_complexity)]
             struct LegacyCache {
                 data: HashMap<(String, u32, u32, u64), (usize, usize, usize)>,
                 alignment_config: AlignmentConfig,
@@ -515,11 +516,11 @@ impl DistanceEngine {
         // Compute alignments with periodic progress updates
         let results: Vec<_> = missing_pairs.into_par_iter()
             .filter_map(|(locus, crc1, crc2)| {
-                let alignment_result = self.compute_single_alignment(&locus, *crc1, *crc2, mode);
+                let alignment_result = self.compute_single_alignment(locus, *crc1, *crc2, mode);
                 
                 // Increment and check if we should update progress
                 let completed = completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                if completed % update_frequency == 0 {
+                if completed.is_multiple_of(update_frequency) {
                     pb.set_position(completed as u64);
                 }
                 
@@ -780,40 +781,8 @@ impl DistanceEngine {
         Ok(enriched_count)
     }
     
-    /// Load sequence lengths from schema directory
-    fn load_schema_sequence_lengths(&self, schema_path: &str) -> Result<HashMap<String, HashMap<String, usize>>, String> {
-        use std::fs;
-        use std::path::Path;
-        
-        let schema_dir = Path::new(schema_path);
-        let mut all_lengths = HashMap::new();
-        
-        let entries = fs::read_dir(schema_dir)
-            .map_err(|e| format!("Failed to read schema directory: {}", e))?;
-        
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-            let path = entry.path();
-            
-            if path.extension().and_then(|s| s.to_str()) == Some("fasta") {
-                if let Some(filename) = path.file_stem().and_then(|s| s.to_str()) {
-                    let locus_name = filename.to_string();
-                    match self.load_fasta_lengths(&path) {
-                        Ok(lengths) => {
-                            all_lengths.insert(locus_name, lengths);
-                        }
-                        Err(e) => {
-                            eprintln!("⚠️  Warning: Failed to load {}: {}", filename, e);
-                        }
-                    }
-                }
-            }
-        }
-        
-        Ok(all_lengths)
-    }
-    
-    /// Load schema with both lengths and CRC mapping for enrichment  
+    /// Load schema with both lengths and CRC mapping for enrichment
+    #[allow(clippy::type_complexity)]
     fn load_schema_with_crc_mapping(&self, schema_path: &str) -> Result<(HashMap<String, HashMap<String, usize>>, HashMap<u32, usize>), String> {
         use std::fs;
         use std::path::Path;
@@ -853,50 +822,8 @@ impl DistanceEngine {
         Ok((all_lengths, crc_to_length))
     }
     
-    /// Load sequence lengths from a single FASTA file
-    fn load_fasta_lengths(&self, fasta_path: &Path) -> Result<HashMap<String, usize>, String> {
-        use std::fs;
-        
-        let content = fs::read_to_string(fasta_path)
-            .map_err(|e| format!("Failed to read FASTA file: {}", e))?;
-        
-        let mut lengths = HashMap::new();
-        let mut current_id = String::new();
-        let mut current_seq_len = 0;
-        
-        for line in content.lines() {
-            if line.starts_with('>') {
-                // Save previous sequence if exists
-                if !current_id.is_empty() {
-                    lengths.insert(current_id.clone(), current_seq_len);
-                }
-                
-                // Parse new sequence ID (e.g., >INNUENDO_cgMLST-00031717_1)
-                current_id = line[1..].split_whitespace().next()
-                    .unwrap_or("")
-                    .to_string();
-                
-                // Extract just the allele number
-                if let Some(underscore_pos) = current_id.rfind('_') {
-                    current_id = current_id[underscore_pos + 1..].to_string();
-                }
-                
-                current_seq_len = 0;
-            } else {
-                // Add to current sequence length
-                current_seq_len += line.trim().len();
-            }
-        }
-        
-        // Save last sequence
-        if !current_id.is_empty() {
-            lengths.insert(current_id, current_seq_len);
-        }
-        
-        Ok(lengths)
-    }
-    
     /// Load FASTA file with both lengths and CRC mapping
+    #[allow(clippy::type_complexity)]
     fn load_fasta_with_crc_mapping(&self, fasta_path: &Path, hasher: &dyn AlleleHasher) -> Result<(HashMap<String, usize>, HashMap<u32, usize>), String> {
         use std::fs;
         
@@ -909,29 +836,29 @@ impl DistanceEngine {
         let mut current_sequence = String::new();
         
         for line in content.lines() {
-            if line.starts_with('>') {
+            if let Some(stripped) = line.strip_prefix('>') {
                 // Save previous sequence if exists
                 if !current_id.is_empty() && !current_sequence.is_empty() {
                     let seq_len = current_sequence.len();
                     lengths.insert(current_id.clone(), seq_len);
-                    
+
                     // Calculate hash for this sequence
                     let hash = hasher.hash_sequence(&current_sequence);
                     if let Some(crc) = hash.as_crc32() {
                         crc_to_length.insert(crc, seq_len);
                     }
                 }
-                
+
                 // Parse new sequence ID (e.g., >INNUENDO_cgMLST-00031717_1)
-                current_id = line[1..].split_whitespace().next()
+                current_id = stripped.split_whitespace().next()
                     .unwrap_or("")
                     .to_string();
-                
+
                 // Extract just the allele number
                 if let Some(underscore_pos) = current_id.rfind('_') {
                     current_id = current_id[underscore_pos + 1..].to_string();
                 }
-                
+
                 current_sequence.clear();
             } else {
                 // Add to current sequence
@@ -1027,8 +954,8 @@ pub fn calculate_distance_matrix(
     let mut matrix = vec![vec![None; n_samples]; n_samples];
     
     // Fill diagonal with zeros
-    for i in 0..n_samples {
-        matrix[i][i] = Some(0);
+    for (i, row) in matrix.iter_mut().enumerate().take(n_samples) {
+        row[i] = Some(0);
     }
     
     // Calculate upper triangle in parallel with progress bar
@@ -1067,7 +994,7 @@ pub fn calculate_distance_matrix(
                 
                 // Update progress periodically
                 let count = progress_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                if count % update_interval == 0 {
+                if count.is_multiple_of(update_interval) {
                     pb_clone.set_position(count as u64);
                 }
                 

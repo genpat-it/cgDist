@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, BufRead};
+use std::str::FromStr;
 use regex::Regex;
 use crate::cli::args::Args;
 use crate::hashers::HasherRegistry;

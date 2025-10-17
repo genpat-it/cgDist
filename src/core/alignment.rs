@@ -1,6 +1,7 @@
 // alignment.rs - Alignment configuration and utilities
 
 use serde::{Serialize, Deserialize};
+use std::str::FromStr;
 
 /// Configuration for sequence alignment
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,8 +93,10 @@ pub enum DistanceMode {
     Hamming,
 }
 
-impl DistanceMode {
-    pub fn from_str(s: &str) -> Result<Self, String> {
+impl FromStr for DistanceMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "snps" | "snps-only" => Ok(DistanceMode::SnpsOnly),
             "snps-indel-events" | "snps+indel-events" => Ok(DistanceMode::SnpsAndIndelEvents),
@@ -102,7 +105,9 @@ impl DistanceMode {
             _ => Err(format!("Invalid distance mode: {}. Use: snps, snps-indel-events, snps-indel-bases, hamming", s))
         }
     }
-    
+}
+
+impl DistanceMode {
     pub fn description(&self) -> &str {
         match self {
             DistanceMode::SnpsOnly => "SNPs only",
