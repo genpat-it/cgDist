@@ -520,7 +520,7 @@ impl DistanceEngine {
                 
                 // Increment and check if we should update progress
                 let completed = completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                if completed.is_multiple_of(update_frequency) {
+                if completed % update_frequency == 0 {
                     pb.set_position(completed as u64);
                 }
                 
@@ -994,7 +994,7 @@ pub fn calculate_distance_matrix(
                 
                 // Update progress periodically
                 let count = progress_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                if count.is_multiple_of(update_interval) {
+                if count % update_interval == 0 {
                     pb_clone.set_position(count as u64);
                 }
                 
