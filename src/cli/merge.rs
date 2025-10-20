@@ -16,7 +16,7 @@ impl Args {
         if self.output.is_none() {
             self.output = config.output;
         }
-        
+
         // Core settings (only override defaults, not explicit CLI values)
         if self.hasher_type == "crc32" && config.hasher_type.is_some() {
             self.hasher_type = config.hasher_type.unwrap();
@@ -30,7 +30,7 @@ impl Args {
         if self.missing_char == "-" && config.missing_char.is_some() {
             self.missing_char = config.missing_char.unwrap();
         }
-        
+
         // Performance
         if self.threads.is_none() {
             self.threads = config.threads;
@@ -41,7 +41,7 @@ impl Args {
         if self.cache_note.is_none() {
             self.cache_note = config.cache_note;
         }
-        
+
         // Quality filters (only override default 0.0)
         if self.sample_threshold == 0.0 && config.sample_threshold.is_some() {
             self.sample_threshold = config.sample_threshold.unwrap();
@@ -52,7 +52,7 @@ impl Args {
         if self.min_loci == 0 && config.min_loci.is_some() {
             self.min_loci = config.min_loci.unwrap();
         }
-        
+
         // Sample/Loci filtering
         if self.include_samples.is_none() {
             self.include_samples = config.include_samples;
@@ -78,7 +78,7 @@ impl Args {
         if self.exclude_samples_list.is_none() {
             self.exclude_samples_list = config.exclude_samples_list;
         }
-        
+
         // Alignment settings (only override default "dna")
         if self.alignment_mode == "dna" && config.alignment_mode.is_some() {
             self.alignment_mode = config.alignment_mode.unwrap();
@@ -95,7 +95,7 @@ impl Args {
         if self.gap_extend.is_none() {
             self.gap_extend = config.gap_extend;
         }
-        
+
         // Flags (CLI flags take precedence, config only sets if not explicitly set)
         if !self.no_hamming_fallback && config.no_hamming_fallback.unwrap_or(false) {
             self.no_hamming_fallback = true;
@@ -109,10 +109,10 @@ impl Args {
         if self.save_alignments.is_none() {
             self.save_alignments = config.save_alignments;
         }
-        
+
         self
     }
-    
+
     /// Load configuration and merge with CLI args
     pub fn with_config_file(self, config_path: &str) -> Result<Self, String> {
         let config = Config::from_file(config_path)?;

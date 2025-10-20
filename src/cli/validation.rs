@@ -1,13 +1,13 @@
 // validation.rs - Input validation utilities
 
+use crate::cli::args::Args;
+use crate::core::{AlignmentConfig, DistanceMode};
+use crate::hashers::HasherRegistry;
+use regex::Regex;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufReader, BufRead};
+use std::io::{BufRead, BufReader};
 use std::str::FromStr;
-use regex::Regex;
-use crate::cli::args::Args;
-use crate::hashers::HasherRegistry;
-use crate::core::{DistanceMode, AlignmentConfig};
 
 pub struct ValidationResult {
     pub distance_mode: DistanceMode,
@@ -27,9 +27,11 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
     // Validate hasher type
     let registry = HasherRegistry::new();
     if !registry.has_hasher(&args.hasher_type) {
-        return Err(format!("Invalid hasher type '{}'. Available: {}", 
-                          args.hasher_type,
-                          registry.get_hasher_names().join(", ")));
+        return Err(format!(
+            "Invalid hasher type '{}'. Available: {}",
+            args.hasher_type,
+            registry.get_hasher_names().join(", ")
+        ));
     }
 
     // Validate hamming hasher incompatibilities
@@ -47,10 +49,12 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
             return Err(format!("Distance mode '{}' is not compatible with --hasher-type hamming (hamming works at allelic level)", args.mode));
         }
     }
-    
+
     // Validate cache-only mode
     if args.cache_only && args.cache_file.is_none() {
-        return Err("--cache-only requires --cache-file to specify where to save the cache".to_string());
+        return Err(
+            "--cache-only requires --cache-file to specify where to save the cache".to_string(),
+        );
     }
 
     // Validate distance mode
@@ -60,8 +64,11 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
     let alignment_config = if args.hasher_type == "hamming" {
         // Hamming hasher doesn't need alignment config
         AlignmentConfig::default()
-    } else if args.match_score.is_some() || args.mismatch_penalty.is_some() ||
-              args.gap_open.is_some() || args.gap_extend.is_some() {
+    } else if args.match_score.is_some()
+        || args.mismatch_penalty.is_some()
+        || args.gap_open.is_some()
+        || args.gap_extend.is_some()
+    {
         // Custom mode
         AlignmentConfig::custom(
             args.match_score.unwrap_or(2),
@@ -80,7 +87,8 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
             if std::path::Path::new(cache_path).exists() && !args.force_recompute {
                 // Quick heuristic compatibility check without loading full data
                 use crate::core::DistanceEngine;
-                let temp_engine = DistanceEngine::new(alignment_config.clone(), args.hasher_type.clone());
+                let temp_engine =
+                    DistanceEngine::new(alignment_config.clone(), args.hasher_type.clone());
                 if let Err(e) = temp_engine.check_cache_compatibility(cache_path, distance_mode) {
                     eprintln!("❌ FATAL ERROR: Cache incompatible: {}", e);
                     eprintln!("💡 Solutions:");
@@ -169,19 +177,29 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
 fn load_set_from_file(file_path: &str) -> Result<HashSet<String>, String> {
     let file = File::open(file_path)
         .map_err(|e| format!("Failed to open filter file '{}': {}", file_path, e))?;
-    
+
     let reader = BufReader::new(file);
     let mut set = HashSet::new();
-    
+
     for (line_num, line) in reader.lines().enumerate() {
-        let line = line.map_err(|e| format!("Failed to read line {} from '{}': {}", 
-                                           line_num + 1, file_path, e))?;
+        let line = line.map_err(|e| {
+            format!(
+                "Failed to read line {} from '{}': {}",
+                line_num + 1,
+                file_path,
+                e
+            )
+        })?;
         let trimmed = line.trim();
         if !trimmed.is_empty() {
             set.insert(trimmed.to_string());
         }
     }
-    
-    println!("📋 Loaded {} items from filter file '{}'", set.len(), file_path);
+
+    println!(
+        "📋 Loaded {} items from filter file '{}'",
+        set.len(),
+        file_path
+    );
     Ok(set)
 }

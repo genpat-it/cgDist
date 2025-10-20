@@ -45,33 +45,36 @@
 //! ```
 
 // Re-export all main modules
-pub mod hashers;
-pub mod data;
-pub mod core;
 pub mod cli;
+pub mod core;
+pub mod data;
+pub mod hashers;
 pub mod output;
 
 // Convenience prelude for common imports
 pub mod prelude {
-    pub use crate::hashers::{AlleleHash, AlleleHashPair, AlleleHasher, HasherRegistry};
-    pub use crate::hashers::{Crc32Hasher, Sha256Hasher, Md5Hasher, SequenceHasher};
-    pub use crate::data::{AllelicProfile, AllelicMatrix, SequenceInfo, SequenceDatabase};
-    pub use crate::core::{AlignmentConfig, DistanceMode, DistanceEngine};
+    pub use crate::cli::{validate_args, Args, ValidationResult};
     pub use crate::core::{calculate_distance_matrix, calculate_sample_distance};
-    pub use crate::cli::{Args, ValidationResult, validate_args};
+    pub use crate::core::{AlignmentConfig, DistanceEngine, DistanceMode};
+    pub use crate::data::{AllelicMatrix, AllelicProfile, SequenceDatabase, SequenceInfo};
+    pub use crate::hashers::{AlleleHash, AlleleHashPair, AlleleHasher, HasherRegistry};
+    pub use crate::hashers::{Crc32Hasher, Md5Hasher, SequenceHasher, Sha256Hasher};
     pub use crate::output::write_matrix;
 }
 
 // Re-export main types at the root level for convenience
-pub use hashers::{AlleleHash, AlleleHashPair, AlleleHasher, HasherRegistry};
-pub use data::{AllelicProfile, AllelicMatrix, SequenceInfo, SequenceDatabase};
-pub use core::{AlignmentConfig, DistanceMode, DistanceEngine};
 pub use cli::{Args, ValidationResult};
+pub use core::{AlignmentConfig, DistanceEngine, DistanceMode};
+pub use data::{AllelicMatrix, AllelicProfile, SequenceDatabase, SequenceInfo};
+pub use hashers::{AlleleHash, AlleleHashPair, AlleleHasher, HasherRegistry};
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Get library information
 pub fn get_info() -> String {
-    format!("cgdist v{} - High-performance distance calculator for cgMLST", VERSION)
+    format!(
+        "cgdist v{} - High-performance distance calculator for cgMLST",
+        VERSION
+    )
 }

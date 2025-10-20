@@ -1,7 +1,7 @@
 // traits.rs - Core traits and types for the hasher system
 
+use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
-use serde::{Serialize, Deserialize};
 
 /// Unified enum for all supported hash types - production ready
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -18,21 +18,21 @@ impl AlleleHash {
     pub fn is_missing(&self) -> bool {
         matches!(self, AlleleHash::Missing)
     }
-    
+
     pub fn as_crc32(&self) -> Option<u32> {
         match self {
             AlleleHash::Crc32(val) => Some(*val),
             _ => None,
         }
     }
-    
+
     pub fn as_string(&self) -> Option<&str> {
         match self {
             AlleleHash::String(s) => Some(s),
             _ => None,
         }
     }
-    
+
     /// Create from CRC32 value
     pub fn from_crc32(val: u32) -> Self {
         if val == u32::MAX {
@@ -41,7 +41,7 @@ impl AlleleHash {
             AlleleHash::Crc32(val)
         }
     }
-    
+
     /// Create from string value
     pub fn from_string(val: String, missing_marker: &str) -> Self {
         if val == missing_marker {
@@ -74,21 +74,22 @@ impl AlleleHashPair {
         if hash1 <= hash2 {
             Self { hash1, hash2 }
         } else {
-            Self { hash1: hash2, hash2: hash1 }
+            Self {
+                hash1: hash2,
+                hash2: hash1,
+            }
         }
     }
-    
+
     /// Check if either hash is missing
     pub fn has_missing(&self) -> bool {
         self.hash1.is_missing() || self.hash2.is_missing()
     }
-    
+
     /// Convert to legacy CrcPair if both are CRC32 (used for backward compatibility)
     pub fn to_crc_pair(&self) -> Option<(u32, u32)> {
         match (&self.hash1, &self.hash2) {
-            (AlleleHash::Crc32(c1), AlleleHash::Crc32(c2)) => {
-                Some((*c1, *c2))
-            }
+            (AlleleHash::Crc32(c1), AlleleHash::Crc32(c2)) => Some((*c1, *c2)),
             _ => None,
         }
     }
@@ -99,27 +100,27 @@ impl AlleleHashPair {
 pub trait AlleleHasher: Send + Sync + Debug {
     /// Compute the hash/identifier for a nucleotide sequence
     fn hash_sequence(&self, sequence: &str) -> AlleleHash;
-    
+
     /// Parse an allele string from a profile file
     fn parse_allele(&self, allele_str: &str, missing_char: &str) -> Result<AlleleHash, String>;
-    
+
     /// Get a human-readable name for this hasher
     fn name(&self) -> &'static str;
-    
+
     /// Get a description of this hasher
     fn description(&self) -> &'static str;
-    
+
     /// Create a pair of hashes with ordering
     fn make_pair(&self, hash1: AlleleHash, hash2: AlleleHash) -> AlleleHashPair {
         AlleleHashPair::new(hash1, hash2)
     }
-    
+
     /// Validate that a sequence is acceptable for this hasher
     fn validate_sequence(&self, _sequence: &str) -> Result<(), String> {
         // Default implementation accepts any sequence
         Ok(())
     }
-    
+
     /// Get the missing allele marker
     fn missing_allele(&self) -> AlleleHash {
         AlleleHash::Missing
