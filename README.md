@@ -26,6 +26,7 @@ cgDist is a high-performance Rust implementation for calculating genetic distanc
 - [Quick Start](#-quick-start)
 - [Usage](#-usage)
 - [Recombination Analysis](#-recombination-analysis)
+- [Cache Inspector](#-cache-inspector)
 - [Custom Hashers Plugin System](#-custom-hashers-plugin-system)
 - [API Documentation](#-api-documentation)
 - [Citation](#-citation)
@@ -74,14 +75,20 @@ docker run -v $(pwd):/data cgdist-rs cgdist --help
 ### Basic Distance Calculation
 
 ```bash
-# Calculate distances from FASTA alignment
-cgdist sequences.fasta --output distances.tsv
+# Calculate SNP distances from cgMLST profiles
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv
+
+# Use different distance mode
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv --mode snps-indel-bases
 
 # Use different hashing algorithm
-cgdist sequences.fasta --hasher sha256 --output distances.tsv
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv --hasher-type sha256
 
-# Enable parallel processing
-cgdist sequences.fasta --threads 8 --output distances.tsv
+# Enable cache for faster recomputation
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv --cache-file cache.lz4
+
+# Specify number of threads
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv --threads 16
 ```
 
 ### Configuration File
@@ -90,18 +97,24 @@ Create a `cgdist-config.toml` file:
 
 ```toml
 [general]
-hasher = "crc32"
+hasher_type = "crc32"
 threads = 8
-cache_dir = "./cache"
+cache_file = "./cache/cgdist_cache.lz4"
+missing_char = "-"
+
+[filtering]
+min_loci = 0
+sample_threshold = 0.0
+locus_threshold = 0.0
 
 [output]
 format = "tsv"
-include_headers = true
+mode = "snps"
 ```
 
 ```bash
 # Use configuration file
-cgdist sequences.fasta --config cgdist-config.toml
+cgdist --schema schema_dir/ --profiles profiles.tsv --config cgdist-config.toml --output distances.tsv
 ```
 
 ## 📊 Usage
@@ -146,9 +159,18 @@ PERFORMANCE OPTIONS:
     --threads <N>              Number of threads [default: auto-detect]
     --cache-file <FILE>        Cache file path (.lz4 extension)
     --cache-note <TEXT>        Note to save with cache
+    --cache-only               Build cache only without computing distance matrix
     --force-recompute          Force recomputation ignoring cache
     --hasher-type <TYPE>       Allele hasher type [default: crc32]
                                Options: crc32, sha256, md5, sequence, hamming
+
+CACHE ENRICHMENT OPTIONS:
+    --enrich-lengths           Enrich cache with nucleotide sequence lengths from schema
+    --enrich-output <FILE>     Output file for enriched cache [default: overwrites input cache]
+
+RECOMBINATION DETECTION OPTIONS:
+    --recombination-log <FILE>      Output log of allele pairs exceeding threshold
+    --recombination-threshold <N>   Threshold for recombination detection (SNPs + InDel bases) [default: 20]
 
 OTHER OPTIONS:
     --missing-char <CHAR>      Missing data character [default: -]
@@ -165,16 +187,27 @@ OTHER OPTIONS:
 
 ### Supported Input Formats
 
-- **FASTA**: Multi-sequence alignment files
-- **CSV/TSV**: Tabular sequence data
-- **Compressed**: LZ4 compressed files (automatic detection)
+**Schema** (FASTA directory):
+- Individual FASTA files per locus
+- Each file contains allele sequences
+- File names correspond to locus names
+
+**Profiles** (allelic profiles):
+- **TSV**: Tab-separated values
+- **CSV**: Comma-separated values
+- Format: Sample name | Locus1 | Locus2 | ... | LocusN
+- Missing data represented by configurable character (default: `-`)
+
+**Cache files**:
+- **LZ4**: Compressed cache files (.lz4 or .bin extension)
+- Automatic compression/decompression
 
 ### Output Formats
 
-- **TSV**: Tab-separated values (default)
-- **CSV**: Comma-separated values
-- **JSON**: Structured JSON output
-- **Matrix**: Full distance matrix
+- **TSV**: Tab-separated distance matrix (default)
+- **CSV**: Comma-separated distance matrix
+- **PHYLIP**: Phylogenetic analysis format
+- **NEXUS**: Nexus format for phylogenetic tools
 
 ## 🧬 Recombination Analysis
 
@@ -186,91 +219,117 @@ cgDist includes powerful tools for detecting and analyzing genetic recombination
 - **Hamming Distance Filtering**: Focuses analysis on genetically related samples
 - **Pairwise Recombination Summary**: Comprehensive overview of recombination between sample pairs
 - **EFSA Loci Support**: Compatible with standardized loci sets for food safety applications
+- **Distance Matrix Correction**: Adjusts distances by excluding recombinant loci
 
-### Basic Usage
+### Tool 1: Built-in Recombination Detection
+
+The main `cgdist` binary can detect potential recombination events during distance calculation:
+
+```bash
+# Detect recombination events with default threshold (20 SNPs+InDel bases)
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
+    --recombination-log recombination_events.csv \
+    --mode snps-indel-bases
+
+# Custom threshold (e.g., 30 SNPs+InDel bases)
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
+    --recombination-log recombination_events.csv \
+    --recombination-threshold 30 \
+    --mode snps-indel-bases
+```
+
+**Output**: CSV log with locus, sample pairs, divergence percentages, and sequence lengths
+
+### Tool 2: Recombination Analyzer (Post-processing)
+
+For advanced analysis with Hamming filtering and EFSA loci support:
 
 ```bash
 # Build recombination analyzer
-cargo build --release --bin cache_recombination_clean
+cargo build --release --bin recombination_analyzer
 
-# Run analysis with default settings (3% threshold, Hamming ≤ 15)
-./target/release/cache_recombination_clean \
-    enriched_cache.bin \
-    allelic_profiles.tsv \
-    efsa_loci.tsv
+# Step 1: Create enriched cache with sequence lengths
+cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
+    --cache-file cache.bin --enrich-lengths --mode snps-indel-bases
 
-# Custom thresholds
-./target/release/cache_recombination_clean \
-    enriched_cache.bin \
-    allelic_profiles.tsv \
-    efsa_loci.tsv \
-    5.0 \    # 5% mutation density threshold
-    - \      # Missing data character
-    10       # Hamming distance threshold ≤ 10
+# Step 2: Run recombination analyzer
+./target/release/recombination_analyzer \
+    --enriched-cache cache.bin \
+    --profiles profiles.tsv \
+    --distance-matrix distances.tsv \
+    --output-matrix corrected_distances.tsv \
+    --recombination-log recombination_events.tsv \
+    --threshold 3.0
+
+# Custom threshold (5% mutation density)
+./target/release/recombination_analyzer \
+    --enriched-cache cache.bin \
+    --profiles profiles.tsv \
+    --distance-matrix distances.tsv \
+    --output-matrix corrected_distances.tsv \
+    --recombination-log recombination_events.tsv \
+    --threshold 5.0
 ```
 
 ### Input Requirements
 
-1. **Enriched Cache**: `.bin` file generated by cgdist with `--cache-file` option
+**For Tool 1 (Built-in Detection)**:
+1. **Schema**: FASTA directory with allele sequences
+2. **Profiles**: TSV/CSV file with sample-locus-allele matrix
+
+**For Tool 2 (Recombination Analyzer)**:
+1. **Enriched Cache**: `.bin` file generated with `--enrich-lengths` option
 2. **Allelic Profiles**: TSV file with sample-locus-allele matrix
-3. **EFSA Loci**: TSV file listing loci of interest (one per line)
+3. **Distance Matrix**: Original distance matrix from cgdist
+4. **EFSA Loci** (optional): TSV file listing loci of interest
 
 ### Output Files
 
-#### 1. Detailed Recombination Events (`recombination_analysis_with_samples.tsv`)
+**Tool 1 Output**: `recombination_events.csv`
+- Locus name
+- Sample pairs
+- Divergence percentage
+- Sequence lengths
+- SNPs and InDel counts
 
-Contains individual recombination events with detailed metrics:
-
-| Column | Description |
-|--------|-------------|
-| Sample1, Sample2 | Sample pair showing recombination |
-| Locus | Specific locus with recombination |
-| Allele1, Allele2 | CRC hashes of different alleles |
-| SNPs | Number of single nucleotide polymorphisms |
-| IndelEvents | Number of insertion/deletion events |
-| TotalMutations | SNPs + IndelEvents |
-| AvgLength | Average sequence length |
-| SNPDensity% | SNP density per sequence length |
-| IndelDensity% | Indel density per sequence length |
-| TotalDensity% | Total mutation density |
-
-#### 2. Pairwise Summary (`pairwise_recombination_summary.tsv`)
-
-Summarizes recombination between sample pairs:
-
-| Column | Description |
-|--------|-------------|
-| Sample1, Sample2 | Sample pair |
-| RecombiningLoci | Number of loci showing recombination |
-| TotalEFSALoci | Total loci analyzed (from EFSA list) |
-| RecombinationPercentage% | Percentage of loci with recombination |
+**Tool 2 Outputs**:
+1. **Corrected Distance Matrix**: Distance matrix with recombinant loci excluded
+2. **Recombination Events Log**: Detailed list of detected recombination events with:
+   - Sample pairs
+   - Locus information
+   - Mutation statistics (SNPs, InDels)
+   - Density percentages
+   - Sequence lengths
 
 ### Parameters
 
-- **Mutation Density Threshold**: Minimum mutation density (%) to classify as recombination (default: 3.0%)
-- **Missing Data Character**: Character representing missing alleles (default: "-")
-- **Hamming Threshold**: Maximum Hamming distance between samples to include in analysis (default: 15)
+**Tool 1 (Built-in)**:
+- `--recombination-threshold`: SNPs + InDel bases threshold (default: 20)
 
-### Example Analysis Workflow
+**Tool 2 (Recombination Analyzer)**:
+- `--threshold`: Mutation density percentage (default: 3.0%)
+
+### Complete Workflow Example
 
 ```bash
-# 1. Generate enriched cache with cgdist
-./target/release/cgdist \
+# Option A: Quick detection during distance calculation
+cgdist --schema schema/ --profiles samples.tsv --output distances.tsv \
+    --recombination-log events.csv --recombination-threshold 20 \
+    --mode snps-indel-bases
+
+# Option B: Advanced analysis with corrected distances
+# Step 1: Create enriched cache
+cgdist --schema schema/ --profiles samples.tsv --output distances.tsv \
+    --cache-file cache.bin --enrich-lengths --mode snps-indel-bases
+
+# Step 2: Analyze and correct
+./target/release/recombination_analyzer \
+    --enriched-cache cache.bin \
     --profiles samples.tsv \
-    --schema schema_dir/ \
-    --cache-file enriched_cache.bin \
-    --mode snps-indel-events
-
-# 2. Run recombination analysis
-./target/release/cache_recombination_clean \
-    enriched_cache.bin \
-    samples.tsv \
-    efsa_loci.tsv \
-    3.0 - 15
-
-# 3. Analyze results
-head -20 recombination_analysis_with_samples.tsv
-head -10 pairwise_recombination_summary.tsv
+    --distance-matrix distances.tsv \
+    --output-matrix corrected_distances.tsv \
+    --recombination-log events.tsv \
+    --threshold 3.0
 ```
 
 ### Interpretation Guidelines
@@ -293,6 +352,60 @@ head -10 pairwise_recombination_summary.tsv
 3. **Food Safety**: Monitor recombination in foodborne pathogens
 4. **Antimicrobial Resistance**: Detect resistance gene transfer events
 5. **Population Genomics**: Understand bacterial population structure
+
+## 🔍 Cache Inspector
+
+The `inspector` tool provides detailed analysis of cgDist cache files, including validation, statistics, and compatibility checks.
+
+### Building the Inspector
+
+```bash
+cargo build --release --bin inspector
+```
+
+### Basic Usage
+
+```bash
+# Show cache summary
+./target/release/inspector --cache cache.lz4
+
+# Detailed information including all loci
+./target/release/inspector --cache cache.lz4 --detailed
+
+# Show entries for specific locus
+./target/release/inspector --cache cache.lz4 --show-locus locus_name
+
+# Validate cache integrity
+./target/release/inspector --cache cache.lz4 --validate
+
+# Export cache summary to TSV
+./target/release/inspector --cache cache.lz4 --export-summary summary.tsv
+
+# Check top N loci by entry count
+./target/release/inspector --cache cache.lz4 --top-loci 20
+```
+
+### Advanced Features
+
+```bash
+# Detect alignment mode from parameters
+./target/release/inspector --cache cache.lz4 --detect-mode
+
+# Check compatibility with specific alignment parameters
+./target/release/inspector --cache cache.lz4 \
+    --check-compatibility "5,-4,-10,-1"  # match,mismatch,gap_open,gap_extend
+
+# Quiet mode for scripting
+./target/release/inspector --cache cache.lz4 --validate --quiet
+```
+
+### Use Cases
+
+1. **Cache Validation**: Verify cache file integrity before reuse
+2. **Troubleshooting**: Diagnose cache compatibility issues
+3. **Statistics**: Understand cache size and loci distribution
+4. **Auditing**: Track which alignment parameters were used
+5. **Quality Control**: Ensure cache matches expected schema
 
 ## 🔌 Custom Hashers Plugin System
 
@@ -560,11 +673,21 @@ import pandas as pd
 
 # Run cgdist from Python
 result = subprocess.run([
-    'cgdist', 'sequences.fasta', '--output', 'distances.tsv'
+    'cgdist',
+    '--schema', 'schema_dir/',
+    '--profiles', 'profiles.tsv',
+    '--output', 'distances.tsv',
+    '--mode', 'snps-indel-bases'
 ], capture_output=True, text=True)
 
-# Load results
-distances = pd.read_csv('distances.tsv', sep='\t')
+# Check for errors
+if result.returncode != 0:
+    print(f"Error: {result.stderr}")
+else:
+    # Load results
+    distances = pd.read_csv('distances.tsv', sep='\t', index_col=0)
+    print(f"Distance matrix shape: {distances.shape}")
+    print(distances.head())
 ```
 
 
