@@ -8,12 +8,15 @@ use std::path::Path;
 
 use argh::FromArgs;
 use serde::{Deserialize, Serialize};
-use bincode;
 use lz4_flex::decompress_size_prepended;
 
 // ============================================================================
 // CORE DATA STRUCTURES (must match cgdist.rs exactly)
 // ============================================================================
+
+// Type aliases for complex types to satisfy clippy
+type CacheKey = (String, u32, u32, u64);
+type CacheValue = (usize, usize, usize);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CrcPair {
@@ -59,7 +62,7 @@ impl AlignmentConfig {
 // Ultra-fast cache structure (matches cgdist.rs)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UltraFastCache {
-    pub data: HashMap<(String, u32, u32, u64), (usize, usize, usize)>,
+    pub data: HashMap<CacheKey, CacheValue>,
     pub version: String,
     pub created: String,
     pub alignment_config: AlignmentConfig,
@@ -473,11 +476,11 @@ fn export_summary_to_tsv(cache: &UltraFastCache, output_path: &str) -> Result<()
     writeln!(file, "# Version: {}", cache.version)?;
     writeln!(file, "# Created: {}", cache.created)?;
     writeln!(file, "# Alignment mode: {}", cache.alignment_config.detect_mode())?;
-    writeln!(file, "# Parameters: match={}, mismatch={}, gap_open={}, gap_extend={}", 
+    writeln!(file, "# Parameters: match={}, mismatch={}, gap_open={}, gap_extend={}",
              cache.alignment_config.match_score, cache.alignment_config.mismatch_penalty,
              cache.alignment_config.gap_open, cache.alignment_config.gap_extend)?;
-    writeln!(file, "")?;
-    
+    writeln!(file)?;
+
     writeln!(file, "locus\tentries\tavg_snps\tavg_indel_events\tavg_indel_bases")?;
     
     // Count entries per locus and calculate averages

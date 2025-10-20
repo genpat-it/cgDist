@@ -8,9 +8,9 @@ fn load_matrix_samples(file_path: &str) -> Result<HashSet<String>, Box<dyn std::
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
-    
+
     // Skip comments
-    while let Some(line) = lines.next() {
+    for line in lines.by_ref() {
         let line = line?;
         if !line.starts_with('#') {
             // This is the header with sample names
