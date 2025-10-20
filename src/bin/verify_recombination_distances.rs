@@ -8,9 +8,9 @@ fn load_distance_matrix(file_path: &str) -> Result<HashMap<(String, String), u32
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
-    
+
     // Skip comments
-    while let Some(line) = lines.next() {
+    for line in lines.by_ref() {
         let line = line?;
         if !line.starts_with('#') {
             break;
@@ -24,7 +24,7 @@ fn load_distance_matrix(file_path: &str) -> Result<HashMap<(String, String), u32
     let mut matrix = HashMap::new();
     
     // Read matrix data
-    for (_row_idx, line) in lines.enumerate() {
+    for line in lines {
         let line = line?;
         let distances: Vec<&str> = line.split('\t').collect();
         
@@ -52,7 +52,9 @@ fn load_distance_matrix(file_path: &str) -> Result<HashMap<(String, String), u32
     Ok(matrix)
 }
 
-fn load_recombination_tsv(file_path: &str) -> Result<Vec<(String, String, String, u32, u32)>, Box<dyn std::error::Error>> {
+type RecombinationEvent = (String, String, String, u32, u32);
+
+fn load_recombination_tsv(file_path: &str) -> Result<Vec<RecombinationEvent>, Box<dyn std::error::Error>> {
     println!("📋 Loading recombination events from {}...", file_path);
     
     let file = File::open(file_path)?;

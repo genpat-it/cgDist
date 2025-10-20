@@ -8,10 +8,13 @@ use cgdist::core::distance::ModernCache;
 use cgdist::cli::Config;
 use cgdist::data::SequenceDatabase;
 
+// Type alias for complex cache key/value types
+type LegacyCacheData = std::collections::HashMap<(String, u32, u32, u64), (usize, usize, usize)>;
+
 #[derive(serde::Deserialize)]
 struct LegacyCache {
     #[allow(dead_code)]
-    data: std::collections::HashMap<(String, u32, u32, u64), (usize, usize, usize)>,
+    data: LegacyCacheData,
     #[allow(dead_code)]
     version: Option<String>,
     #[allow(dead_code)]
@@ -100,13 +103,7 @@ fn run_main() -> Result<(), String> {
     }
     
     // Validate all arguments
-    let validation_result = match validate_args(&args) {
-        Ok(result) => result,
-        Err(e) => {
-            eprintln!("❌ ERROR: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let validation_result = validate_args(&args)?;
     
     
     let total_start = Instant::now();
@@ -238,7 +235,7 @@ fn run_main() -> Result<(), String> {
                         };
                         
                         if should_enrich {
-                            if let Some(ref schema_path) = schema {
+                            if let Some(schema_path) = schema {
                                 let enrich_reason = if args.enrich_lengths {
                                     "explicitly requested"
                                 } else {
@@ -298,9 +295,9 @@ fn run_main() -> Result<(), String> {
                     
                     // Check if we should automatically enrich the newly saved cache
                     let should_auto_enrich = !args.enrich_lengths && schema.is_some();
-                    
+
                     if should_auto_enrich {
-                        if let Some(ref schema_path) = schema {
+                        if let Some(schema_path) = schema {
                             println!("🔍 Enriching cache with sequence lengths (automatic)...");
                             let output_cache_path = args.enrich_output.as_ref().unwrap_or(cache_path);
                             match engine.enrich_cache_with_lengths_from_input(schema_path, cache_path, output_cache_path) {
@@ -340,7 +337,7 @@ fn run_main() -> Result<(), String> {
     let distance_matrix = calculate_distance_matrix(
         &matrix.samples,
         &matrix.loci_names,
-        &mut engine,
+        &engine,
         validation_result.distance_mode,
         args.min_loci,
         args.no_hamming_fallback,
@@ -364,9 +361,9 @@ fn run_main() -> Result<(), String> {
                     // Check if we should automatically enrich the newly saved cache
                     // This covers the case where cache was created for the first time
                     let should_auto_enrich = !args.enrich_lengths && schema.is_some();
-                    
+
                     if should_auto_enrich {
-                        if let Some(ref schema_path) = schema {
+                        if let Some(schema_path) = schema {
                             println!("🔍 Enriching newly created cache with sequence lengths (automatic)...");
                             let output_cache_path = args.enrich_output.as_ref().unwrap_or(cache_path);
                             match engine.enrich_cache_with_lengths_from_input(schema_path, cache_path, output_cache_path) {
@@ -422,10 +419,7 @@ fn run_benchmark(args: &Args) -> Result<(), String> {
     let _start_total = Instant::now();
     
     // Validate arguments
-    let validation_result = match validate_args(args) {
-        Ok(result) => result,
-        Err(e) => return Err(e),
-    };
+    let validation_result = validate_args(args)?;
     
     let profiles = args.profiles.as_ref().unwrap();
     
@@ -615,8 +609,8 @@ fn run_benchmark(args: &Args) -> Result<(), String> {
         
         total_pairs_processed += chunk_pairs.len();
         chunk_idx += 1;
-        
-        // Progress update every 5 seconds  
+
+        // Progress update every 5 seconds
         if benchmark_start.elapsed().as_secs() % 5 == 0 && chunk_idx % 3 == 0 {
             let elapsed = benchmark_start.elapsed().as_secs();
             let remaining = args.benchmark_duration - elapsed;
@@ -949,13 +943,11 @@ fn print_modern_cache_info(cache: &ModernCache, compressed: &[u8]) {
     // Show sample cache values to verify content
     println!();
     println!("=== SAMPLE CACHE VALUES (first 5 entries) ===");
-    let mut count = 0;
-    for (string_key, cache_value) in cache.data.iter() {
+    for (count, (string_key, cache_value)) in cache.data.iter().enumerate() {
         if count >= 5 { break; }
         println!("Key: {}", string_key);
-        println!("  └─ SNPs: {}, indel_events: {}, indel_bases: {}, computed: {}", 
+        println!("  └─ SNPs: {}, indel_events: {}, indel_bases: {}, computed: {}",
                  cache_value.snps, cache_value.indel_events, cache_value.indel_bases, cache_value.computed_at);
-        count += 1;
     }
     
     // Show statistics of the values

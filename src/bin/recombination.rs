@@ -105,7 +105,10 @@ fn filter_loci_by_completeness(sample_profiles: &HashMap<String, HashMap<String,
     filtered_loci
 }
 
-fn create_mapping_from_profiles(profiles_path: &str, efsa_loci: &HashSet<String>, missing_char: &str) -> Result<(HashMap<(String, u32), String>, HashMap<String, HashMap<String, String>>), Box<dyn std::error::Error>> {
+type ProfileMapping = HashMap<(String, u32), String>;
+type SampleProfiles = HashMap<String, HashMap<String, String>>;
+
+fn create_mapping_from_profiles(profiles_path: &str, efsa_loci: &HashSet<String>, missing_char: &str) -> Result<(ProfileMapping, SampleProfiles), Box<dyn std::error::Error>> {
     println!("📋 Creating CRC → Sample mapping from profiles...");
     
     let file = File::open(profiles_path)?;
@@ -559,7 +562,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else { 
                     (sample2.to_string(), sample1.to_string()) 
                 };
-                pairwise_recombination.entry(sample_pair).or_insert_with(HashSet::new).insert(locus.to_string());
+                pairwise_recombination.entry(sample_pair).or_default().insert(locus.to_string());
             }
         }
     }
