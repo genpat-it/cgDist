@@ -1,16 +1,21 @@
 // mod.rs - Output formatters module
 
-use std::fs::{File, create_dir_all};
-use std::io::{BufWriter, Write};
-use std::path::Path;
 use crate::data::AllelicProfile;
 use chrono;
+use std::fs::{create_dir_all, File};
+use std::io::{BufWriter, Write};
+use std::path::Path;
 
 /// Ensure parent directory exists before creating file
 fn ensure_parent_dir(file_path: &str) -> Result<(), String> {
     if let Some(parent) = Path::new(file_path).parent() {
-        create_dir_all(parent)
-            .map_err(|e| format!("Failed to create parent directory '{}': {}", parent.display(), e))?;
+        create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create parent directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
     }
     Ok(())
 }
@@ -26,19 +31,25 @@ pub fn write_tsv(
     let file = File::create(file_path)
         .map_err(|e| format!("Failed to create output file '{}': {}", file_path, e))?;
     let mut writer = BufWriter::new(file);
-    
+
     // Write command header
     writeln!(writer, "# Command: {}", command_line).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "# Generated: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION")).map_err(|e| format!("Write error: {}", e))?;
-    
+    writeln!(
+        writer,
+        "# Generated: {}",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    )
+    .map_err(|e| format!("Write error: {}", e))?;
+    writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION"))
+        .map_err(|e| format!("Write error: {}", e))?;
+
     // Write header
     write!(writer, "Sample").map_err(|e| format!("Write error: {}", e))?;
     for sample in samples {
         write!(writer, "\t{}", sample.sample_id).map_err(|e| format!("Write error: {}", e))?;
     }
     writeln!(writer).map_err(|e| format!("Write error: {}", e))?;
-    
+
     // Write matrix
     for (i, sample) in samples.iter().enumerate() {
         write!(writer, "{}", sample.sample_id).map_err(|e| format!("Write error: {}", e))?;
@@ -51,7 +62,7 @@ pub fn write_tsv(
         }
         writeln!(writer).map_err(|e| format!("Write error: {}", e))?;
     }
-    
+
     writer.flush().map_err(|e| format!("Flush error: {}", e))?;
     println!("✅ Distance matrix written to: {}", file_path);
     Ok(())
@@ -68,19 +79,25 @@ pub fn write_csv(
     let file = File::create(file_path)
         .map_err(|e| format!("Failed to create output file '{}': {}", file_path, e))?;
     let mut writer = BufWriter::new(file);
-    
+
     // Write command header
     writeln!(writer, "# Command: {}", command_line).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "# Generated: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION")).map_err(|e| format!("Write error: {}", e))?;
-    
+    writeln!(
+        writer,
+        "# Generated: {}",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    )
+    .map_err(|e| format!("Write error: {}", e))?;
+    writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION"))
+        .map_err(|e| format!("Write error: {}", e))?;
+
     // Write header
     write!(writer, "Sample").map_err(|e| format!("Write error: {}", e))?;
     for sample in samples {
         write!(writer, ",{}", sample.sample_id).map_err(|e| format!("Write error: {}", e))?;
     }
     writeln!(writer).map_err(|e| format!("Write error: {}", e))?;
-    
+
     // Write matrix
     for (i, sample) in samples.iter().enumerate() {
         write!(writer, "{}", sample.sample_id).map_err(|e| format!("Write error: {}", e))?;
@@ -93,7 +110,7 @@ pub fn write_csv(
         }
         writeln!(writer).map_err(|e| format!("Write error: {}", e))?;
     }
-    
+
     writer.flush().map_err(|e| format!("Flush error: {}", e))?;
     println!("✅ Distance matrix written to: {}", file_path);
     Ok(())
@@ -110,13 +127,13 @@ pub fn write_phylip(
     let file = File::create(file_path)
         .map_err(|e| format!("Failed to create output file '{}': {}", file_path, e))?;
     let mut writer = BufWriter::new(file);
-    
+
     // PHYLIP doesn't support comments, but we can add them as the first "sample"
     // Actually, let's put comments at the end to maintain PHYLIP compatibility
-    
+
     // Write header
     writeln!(writer, "    {}", samples.len()).map_err(|e| format!("Write error: {}", e))?;
-    
+
     // Write matrix (lower triangle)
     for (i, sample) in samples.iter().enumerate() {
         write!(writer, "{:<10}", sample.sample_id).map_err(|e| format!("Write error: {}", e))?;
@@ -129,15 +146,24 @@ pub fn write_phylip(
         }
         writeln!(writer).map_err(|e| format!("Write error: {}", e))?;
     }
-    
+
     // Add command info as comments at the end (some PHYLIP parsers ignore trailing content)
     writeln!(writer).map_err(|e| format!("Write error: {}", e))?;
     writeln!(writer, "# Command: {}", command_line).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "# Generated: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION")).map_err(|e| format!("Write error: {}", e))?;
-    
+    writeln!(
+        writer,
+        "# Generated: {}",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    )
+    .map_err(|e| format!("Write error: {}", e))?;
+    writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION"))
+        .map_err(|e| format!("Write error: {}", e))?;
+
     writer.flush().map_err(|e| format!("Flush error: {}", e))?;
-    println!("✅ Distance matrix written to: {} (PHYLIP format)", file_path);
+    println!(
+        "✅ Distance matrix written to: {} (PHYLIP format)",
+        file_path
+    );
     Ok(())
 }
 
@@ -152,20 +178,29 @@ pub fn write_nexus(
     let file = File::create(file_path)
         .map_err(|e| format!("Failed to create output file '{}': {}", file_path, e))?;
     let mut writer = BufWriter::new(file);
-    
+
     // Write NEXUS header with command info
     writeln!(writer, "#NEXUS").map_err(|e| format!("Write error: {}", e))?;
     writeln!(writer, "[Command: {}]", command_line).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "[Generated: {}]", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "[cgDist v{}]", env!("CARGO_PKG_VERSION")).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(
+        writer,
+        "[Generated: {}]",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    )
+    .map_err(|e| format!("Write error: {}", e))?;
+    writeln!(writer, "[cgDist v{}]", env!("CARGO_PKG_VERSION"))
+        .map_err(|e| format!("Write error: {}", e))?;
     writeln!(writer, "BEGIN DISTANCES;").map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "    DIMENSIONS NTAX={};", samples.len()).map_err(|e| format!("Write error: {}", e))?;
-    writeln!(writer, "    FORMAT LABELS LOWER DIAGONAL;").map_err(|e| format!("Write error: {}", e))?;
+    writeln!(writer, "    DIMENSIONS NTAX={};", samples.len())
+        .map_err(|e| format!("Write error: {}", e))?;
+    writeln!(writer, "    FORMAT LABELS LOWER DIAGONAL;")
+        .map_err(|e| format!("Write error: {}", e))?;
     writeln!(writer, "    MATRIX").map_err(|e| format!("Write error: {}", e))?;
-    
+
     // Write matrix (lower triangle)
     for (i, sample) in samples.iter().enumerate() {
-        write!(writer, "        {}", sample.sample_id).map_err(|e| format!("Write error: {}", e))?;
+        write!(writer, "        {}", sample.sample_id)
+            .map_err(|e| format!("Write error: {}", e))?;
         for j in 0..i {
             let distance_str = match matrix[i][j] {
                 Some(d) => d.to_string(),
@@ -175,12 +210,15 @@ pub fn write_nexus(
         }
         writeln!(writer).map_err(|e| format!("Write error: {}", e))?;
     }
-    
+
     writeln!(writer, "    ;").map_err(|e| format!("Write error: {}", e))?;
     writeln!(writer, "END;").map_err(|e| format!("Write error: {}", e))?;
-    
+
     writer.flush().map_err(|e| format!("Flush error: {}", e))?;
-    println!("✅ Distance matrix written to: {} (NEXUS format)", file_path);
+    println!(
+        "✅ Distance matrix written to: {} (NEXUS format)",
+        file_path
+    );
     Ok(())
 }
 
@@ -197,6 +235,9 @@ pub fn write_matrix(
         "csv" => write_csv(file_path, samples, matrix, command_line),
         "phylip" => write_phylip(file_path, samples, matrix, command_line),
         "nexus" => write_nexus(file_path, samples, matrix, command_line),
-        _ => Err(format!("Unsupported output format: {}. Use: tsv, csv, phylip, nexus", format)),
+        _ => Err(format!(
+            "Unsupported output format: {}. Use: tsv, csv, phylip, nexus",
+            format
+        )),
     }
 }

@@ -1,6 +1,6 @@
 // hamming.rs - Hamming distance hasher for CRC allelic comparison
 
-use super::traits::{AlleleHasher, AlleleHash};
+use super::traits::{AlleleHash, AlleleHasher};
 
 /// Hamming distance hasher - works at CRC allelic level only
 /// For CRC alleles: different CRCs = distance 1, same CRCs = distance 0
@@ -17,28 +17,29 @@ impl AlleleHasher for HammingHasher {
         let crc = hasher.finalize();
         AlleleHash::from_crc32(crc)
     }
-    
+
     fn parse_allele(&self, allele_str: &str, missing_char: &str) -> Result<AlleleHash, String> {
         let cleaned = allele_str.trim();
-        
+
         if cleaned.is_empty() || cleaned == "NA" || cleaned == missing_char {
             return Ok(AlleleHash::Missing);
         }
-        
-        let crc = cleaned.parse::<u32>()
+
+        let crc = cleaned
+            .parse::<u32>()
             .map_err(|_| format!("Failed to parse '{}' as CRC32 for Hamming hasher", cleaned))?;
-        
+
         Ok(AlleleHash::from_crc32(crc))
     }
-    
+
     fn name(&self) -> &'static str {
         "Hamming"
     }
-    
+
     fn description(&self) -> &'static str {
         "Hamming distance at CRC allelic level (different CRCs = 1, same CRCs = 0)"
     }
-    
+
     fn validate_sequence(&self, _sequence: &str) -> Result<(), String> {
         // Hamming hasher accepts any sequence since it works at CRC level
         Ok(())
@@ -55,31 +56,31 @@ mod tests {
         let hash1 = hasher.hash_sequence("ATCG");
         let hash2 = hasher.hash_sequence("ATCG");
         let hash3 = hasher.hash_sequence("GCTA");
-        
+
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
     }
-    
+
     #[test]
     fn test_hamming_parse_allele() {
         let hasher = HammingHasher;
-        
+
         // Test normal CRC parsing
         let result = hasher.parse_allele("12345", "-").unwrap();
         assert_eq!(result, AlleleHash::Crc32(12345));
-        
+
         // Test missing allele
         let missing = hasher.parse_allele("-", "-").unwrap();
         assert!(missing.is_missing());
-        
+
         let missing_na = hasher.parse_allele("NA", "-").unwrap();
         assert!(missing_na.is_missing());
-        
+
         // Test invalid input
         let error = hasher.parse_allele("invalid", "-");
         assert!(error.is_err());
     }
-    
+
     #[test]
     fn test_hamming_properties() {
         let hasher = HammingHasher;

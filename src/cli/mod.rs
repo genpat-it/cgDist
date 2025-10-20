@@ -8,4 +8,4 @@ pub mod validation;
 // Re-export main types for convenience
 pub use args::Args;
 pub use config::Config;
-pub use validation::{ValidationResult, validate_args};
+pub use validation::{validate_args, ValidationResult};

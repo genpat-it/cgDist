@@ -1,6 +1,6 @@
 // alignment.rs - Alignment configuration and utilities
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// Configuration for sequence alignment
@@ -53,7 +53,7 @@ impl AlignmentConfig {
             _ => Err(format!("Unknown alignment mode: {}", mode)),
         }
     }
-    
+
     /// Create custom configuration
     pub fn custom(match_score: i32, mismatch_penalty: i32, gap_open: i32, gap_extend: i32) -> Self {
         Self {
@@ -122,16 +122,16 @@ impl DistanceMode {
 pub fn compute_alignment_stats(query: &str, reference: &str) -> (usize, usize, usize) {
     let query_bytes = query.as_bytes();
     let ref_bytes = reference.as_bytes();
-    
+
     let mut snps = 0;
     let mut indel_events = 0;
     let mut indel_bases = 0;
     let mut in_gap = false;
-    
+
     for i in 0..query_bytes.len().min(ref_bytes.len()) {
         let q = query_bytes[i];
         let r = ref_bytes[i];
-        
+
         if q == b'-' || r == b'-' {
             if !in_gap {
                 indel_events += 1;
@@ -145,7 +145,7 @@ pub fn compute_alignment_stats(query: &str, reference: &str) -> (usize, usize, u
             }
         }
     }
-    
+
     (snps, indel_events, indel_bases)
 }
 
@@ -155,14 +155,15 @@ pub fn compute_hamming_distance(seq1: &[u8], seq2: &[u8]) -> usize {
     // Handle sequences of different lengths
     let min_len = seq1.len().min(seq2.len());
     let max_len = seq1.len().max(seq2.len());
-    
+
     // Count mismatches in overlapping region
-    let mismatches = seq1.iter()
+    let mismatches = seq1
+        .iter()
         .take(min_len)
         .zip(seq2.iter().take(min_len))
         .filter(|(a, b)| a != b)
         .count();
-    
+
     // Add length difference as additional mismatches
     mismatches + (max_len - min_len)
 }

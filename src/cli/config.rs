@@ -1,8 +1,8 @@
 // config.rs - Configuration file support
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -10,23 +10,23 @@ pub struct Config {
     pub profiles: Option<String>,
     pub schema: Option<String>,
     pub output: Option<String>,
-    
+
     // Core settings
     pub hasher_type: Option<String>,
     pub mode: Option<String>,
     pub format: Option<String>,
     pub missing_char: Option<String>,
-    
+
     // Performance
     pub threads: Option<usize>,
     pub cache_file: Option<String>,
     pub cache_note: Option<String>,
-    
+
     // Quality filters
     pub sample_threshold: Option<f64>,
     pub locus_threshold: Option<f64>,
     pub min_loci: Option<usize>,
-    
+
     // Sample/Loci filtering
     pub include_samples: Option<String>,
     pub exclude_samples: Option<String>,
@@ -36,14 +36,14 @@ pub struct Config {
     pub exclude_loci_list: Option<String>,
     pub include_samples_list: Option<String>,
     pub exclude_samples_list: Option<String>,
-    
+
     // Alignment settings (ignored for hamming)
     pub alignment_mode: Option<String>,
     pub match_score: Option<i32>,
     pub mismatch_penalty: Option<i32>,
     pub gap_open: Option<i32>,
     pub gap_extend: Option<i32>,
-    
+
     // Flags
     pub no_hamming_fallback: Option<bool>,
     pub force_recompute: Option<bool>,
@@ -87,33 +87,33 @@ impl Config {
             save_alignments: None,
         }
     }
-    
+
     /// Load configuration from TOML file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read config file '{}': {}", path.display(), e))?;
-        
+
         let config: Config = toml::from_str(&content)
             .map_err(|e| format!("Failed to parse config file '{}': {}", path.display(), e))?;
-        
+
         println!("📄 Loaded configuration from: {}", path.display());
         Ok(config)
     }
-    
+
     /// Save configuration to TOML file
     pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
         let path = path.as_ref();
         let content = toml::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        
+
         fs::write(path, content)
             .map_err(|e| format!("Failed to write config file '{}': {}", path.display(), e))?;
-        
+
         println!("📄 Saved configuration to: {}", path.display());
         Ok(())
     }
-    
+
     /// Generate a sample configuration file with comments
     pub fn generate_sample() -> String {
         r#"# cgdist.toml - Configuration file for cgdist
@@ -232,7 +232,8 @@ dry_run = false
 
 # Save detailed alignments to file (TSV format)
 # save_alignments = "alignments.tsv"
-"#.to_string()
+"#
+        .to_string()
     }
 }
 
