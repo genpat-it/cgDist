@@ -1,5 +1,7 @@
 // main.rs - CLI entry point
 
+#![allow(unknown_lints, clippy::manual_is_multiple_of)]
+
 use std::collections::HashSet;
 use std::time::Instant;
 // Removed unused import
