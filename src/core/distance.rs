@@ -531,6 +531,7 @@ impl DistanceEngine {
     }
 
     /// Pre-compute all alignments for unique pairs in batch (cache-aware)
+    #[allow(unknown_lints, clippy::manual_is_multiple_of)]
     pub fn precompute_alignments(
         &mut self,
         unique_pairs: &HashSet<(String, u32, u32)>,
@@ -1093,6 +1094,7 @@ pub fn calculate_sample_distance(
 }
 
 /// Calculate full distance matrix
+#[allow(unknown_lints, clippy::manual_is_multiple_of)]
 pub fn calculate_distance_matrix(
     samples: &[AllelicProfile],
     loci_names: &[String],
