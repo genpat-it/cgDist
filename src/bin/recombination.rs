@@ -1,3 +1,5 @@
+#![allow(unknown_lints, clippy::manual_is_multiple_of)]
+
 use argh::FromArgs;
 use cgdist::core::distance::ModernCache;
 use cgdist::hashers::{AlleleHash, AlleleHasher, Crc32Hasher};
