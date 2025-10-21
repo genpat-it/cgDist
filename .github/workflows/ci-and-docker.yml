@@ -2,7 +2,6 @@ name: CI and Docker Build
 
 on:
   push:
-    branches: [ master ]
     tags:
       - 'v*'
   pull_request:
