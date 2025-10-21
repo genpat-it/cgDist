@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/genpat-it/cgDist)
+[![CI](https://github.com/genpat-it/cgDist/actions/workflows/ci.yml/badge.svg)](https://github.com/genpat-it/cgDist/actions/workflows/ci.yml)
 
 **Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis**
 

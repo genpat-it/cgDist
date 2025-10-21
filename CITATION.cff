@@ -1,0 +1,64 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "cgDist: Enhanced Resolution for Bacterial Genomic Surveillance Through Nucleotide-Level Distance Calculation from cgMLST Profiles"
+authors:
+  - family-names: "de Ruvo"
+    given-names: "Andrea"
+    email: "a.deruvo@izs.it"
+    orcid: "https://orcid.org/0000-0002-8762-8175"
+  - family-names: "Castelli"
+    given-names: "Pierluigi"
+  - family-names: "Bucciacchio"
+    given-names: "Andrea"
+  - family-names: "Mangone"
+    given-names: "Iolanda"
+  - family-names: "Mixão"
+    given-names: "Verónica"
+  - family-names: "Borges"
+    given-names: "Vítor"
+  - family-names: "Radomski"
+    given-names: "Nicolas"
+  - family-names: "Di Pasquale"
+    given-names: "Adriano"
+repository-code: "https://github.com/genpat-it/cgDist"
+url: "https://github.com/genpat-it/cgDist"
+abstract: "Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis in bacterial genomics, specifically designed for epidemiological outbreak investigations and phylogenetic analysis."
+keywords:
+  - bioinformatics
+  - genomics
+  - bacterial-genomics
+  - cgmlst
+  - mlst
+  - phylogenetics
+  - snp-analysis
+  - outbreak-investigation
+  - epidemiology
+  - recombination-detection
+  - food-safety
+license: MIT
+version: 0.1.0
+date-released: 2025-10-21
+preferred-citation:
+  type: article
+  authors:
+    - family-names: "de Ruvo"
+      given-names: "Andrea"
+    - family-names: "Castelli"
+      given-names: "Pierluigi"
+    - family-names: "Bucciacchio"
+      given-names: "Andrea"
+    - family-names: "Mangone"
+      given-names: "Iolanda"
+    - family-names: "Mixão"
+      given-names: "Verónica"
+    - family-names: "Borges"
+      given-names: "Vítor"
+    - family-names: "Radomski"
+      given-names: "Nicolas"
+    - family-names: "Di Pasquale"
+      given-names: "Adriano"
+  title: "cgDist: An Enhanced Algorithm for Efficient Calculation of pairwise SNP and InDel differences from Core Genome Multilocus Sequence Typing"
+  year: 2025
+  journal: "bioRxiv"
+  doi: "10.1101/2025.10.16.682749"
