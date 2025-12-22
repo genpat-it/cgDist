@@ -1,31 +1,25 @@
-cff-version: 1.2.0
+cff-version: 1.1.0
 message: "If you use this software, please cite it as below."
-type: software
-title: "cgDist: Nucleotide-Level Distance Calculation from cgMLST Allelic Profiles"
-
 authors:
-  - family-names: "de Ruvo"
-    given-names: "Andrea"
-    orcid: "https://orcid.org/0000-0001-6836-3455"
-  - family-names: "Castelli"
-    given-names: "Pierluigi"
-  - family-names: "Bucciacchio"
-    given-names: "Andrea"
-  - family-names: "Mangone"
-    given-names: "Iolanda"
-  - family-names: "Mixão"
-    given-names: "Verónica"
-  - family-names: "Borges"
-    given-names: "Vítor"
-  - family-names: "Flammini"
-    given-names: "Michele"
-  - family-names: "Radomski"
-    given-names: "Nicolas"
-  - family-names: "Di Pasquale"
-    given-names: "Adriano"
-
-repository-code: "https://github.com/genpat-it/cgDist"
-url: "https://github.com/genpat-it/cgDist"
-license: MIT
-version: 0.1.0
-date-released: 2025-03-01
+- family-names: de Ruvo
+  given-names: Andrea
+  orcid: https://orcid.org/0000-0001-6836-3455
+- family-names: Castelli
+  given-names: Pierluigi
+- family-names: Bucciacchio
+  given-names: Andrea
+- family-names: Mangone
+  given-names: Iolanda
+- family-names: Mixão
+  given-names: Verónica
+- family-names: Borges
+  given-names: Vítor
+- family-names: Flammini
+  given-names: Michele
+- family-names: Radomski
+  given-names: Nicolas
+- family-names: Di Pasquale
+  given-names: Adriano
+title: cgDist - Nucleotide-Level Distance Calculation from cgMLST Allelic Profiles
+version: v0.1.0-paper
+date-released: 2025-12-22
