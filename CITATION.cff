@@ -2,50 +2,30 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "cgDist: Nucleotide-Level Distance Calculation from cgMLST Allelic Profiles"
+
 authors:
   - family-names: "de Ruvo"
     given-names: "Andrea"
-    email: "andrea.deruvo@hotmail.com"
     orcid: "https://orcid.org/0000-0001-6836-3455"
   - family-names: "Castelli"
     given-names: "Pierluigi"
-    orcid: "https://orcid.org/0000-0001-6518-1752"
   - family-names: "Bucciacchio"
     given-names: "Andrea"
-    orcid: "https://orcid.org/0000-0002-2083-5043"
   - family-names: "Mangone"
     given-names: "Iolanda"
-    orcid: "https://orcid.org/0000-0002-6716-091X"
   - family-names: "Mixão"
     given-names: "Verónica"
-    orcid: "https://orcid.org/0000-0001-6669-0161"
   - family-names: "Borges"
     given-names: "Vítor"
-    orcid: "https://orcid.org/0000-0003-3767-2209"
   - family-names: "Flammini"
     given-names: "Michele"
-    orcid: "https://orcid.org/0000-0003-0327-3728"
   - family-names: "Radomski"
     given-names: "Nicolas"
-    orcid: "https://orcid.org/0000-0002-7480-4197"
   - family-names: "Di Pasquale"
     given-names: "Adriano"
-    orcid: "https://orcid.org/0000-0002-9328-3972"
+
 repository-code: "https://github.com/genpat-it/cgDist"
 url: "https://github.com/genpat-it/cgDist"
-abstract: "Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis in bacterial genomics, specifically designed for epidemiological outbreak investigations and phylogenetic analysis."
-keywords:
-  - bioinformatics
-  - genomics
-  - bacterial-genomics
-  - cgmlst
-  - mlst
-  - phylogenetics
-  - snp-analysis
-  - outbreak-investigation
-  - epidemiology
-  - recombination-detection
-  - food-safety
 license: MIT
 version: 0.1.0
-date-released: 2025-10-21
+date-released: 2025-03-01
