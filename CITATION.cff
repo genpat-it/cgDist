@@ -1,18 +1,18 @@
 cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: de Ruvo
+    given-names: Andrea
+    affiliation: "Gran Sasso Science Institute"
+    orcid: "https://orcid.org/0000-0001-6836-3455"
 title: "cgDist"
 version: 0.1.0
-date-released: 2025-12-23
-license: "MIT"
+date-released: "2025-12-23"
+license: MIT
 type: software
-authors:
-  - given-names: Andrea
-    family-names: de Ruvo
-    affiliation: Gran Sasso Science Institute
-    orcid: "https://orcid.org/0000-0001-6836-3455"
 abstract: "Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis"
-message: "If you use this software, please cite it as below."
 keywords:
   - bioinformatics
   - genomics
-  - bacterial genomics
+  - "bacterial genomics"
   - cgmlst
