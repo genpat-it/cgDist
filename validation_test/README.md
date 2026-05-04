@@ -67,13 +67,27 @@ The test uses 3 loci with carefully designed allelic variants:
 
 ## Running the Validation
 
+There are two ways to run the validation suite from a fresh clone:
+
+- **Quick smoke test (recommended for first-time users)**: the input fixture
+  `profiles/test_profiles_crc32.tsv` and the schema FASTA files are
+  committed to the repository, so you can skip the setup step and go
+  straight to running `cgdist`. Use this path if you just want to verify
+  that the tool installs and runs correctly.
+- **Regenerate from scratch**: run `setup_validation_test.py` to
+  regenerate the input fixture, the FASTA schema, and the
+  `EXPECTED_RESULTS_CRC32.md` documentation. Use this path if you want
+  to verify that the test generator itself is reproducible, or if you
+  modify the test scenarios. The regenerated fixture is byte-identical
+  to the committed one (CRC32 hashes are deterministic).
+
 ### Step 1: Build cgDist
 ```bash
 cd ..
 RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
 
-### Step 2: Generate Test Data
+### Step 2: Generate Test Data (optional — fixture already committed)
 ```bash
 cd validation_test
 python3 setup_validation_test.py

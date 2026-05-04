@@ -91,6 +91,35 @@ cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv --cac
 cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv --threads 16
 ```
 
+### Validation / Smoke Test
+
+A self-contained validation suite with a small embedded test dataset
+(3 loci, 10 samples, ~3 KB) is provided in
+[`validation_test/`](validation_test/). It verifies algorithmic
+correctness across all four distance modes (Hamming, SNPs,
+SNPs+InDel-events, SNPs+InDel-bases), checks the mathematical invariant
+`cgDist ≥ Hamming`, and confirms Parasail alignment integration.
+
+```bash
+# After building cgDist (see Installation)
+cd validation_test
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_hamming.tsv --mode hamming --hasher-type crc32
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv --mode snps --hasher-type crc32
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_events.tsv --mode snps-indel-events --hasher-type crc32
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_bases.tsv --mode snps-indel-bases --hasher-type crc32
+
+# Verify expected results
+python3 run_validation.py
+```
+
+Expected output: `🎉 ALL VALIDATION TESTS PASSED!` See
+[`validation_test/README.md`](validation_test/README.md) for details on
+the test design, expected distances, and how to regenerate the fixture
+from scratch.
+
+The validation suite also runs automatically in CI on every push and
+pull request (see `.github/workflows/ci-and-docker.yml`).
+
 ### Configuration File
 
 Create a `cgdist-config.toml` file:

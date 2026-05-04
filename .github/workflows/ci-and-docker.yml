@@ -2,10 +2,11 @@ name: CI and Docker Build
 
 on:
   push:
+    branches: [ master, main ]
     tags:
       - 'v*'
   pull_request:
-    branches: [ master ]
+    branches: [ master, main ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -53,8 +54,28 @@ jobs:
     - name: Build
       run: cargo build --verbose
 
+    - name: Build release (for validation smoke test)
+      run: cargo build --release
+
     - name: Run tests
       run: cargo test --verbose
+
+    - name: Set up Python (for validation suite)
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install validation Python deps
+      run: pip install pandas
+
+    - name: Run end-to-end validation smoke test
+      working-directory: validation_test
+      run: |
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_hamming.tsv             --mode hamming             --hasher-type crc32
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv                --mode snps                --hasher-type crc32
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_events.tsv   --mode snps-indel-events   --hasher-type crc32
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_bases.tsv    --mode snps-indel-bases    --hasher-type crc32
+        python3 run_validation.py
 
   # Second job: Build and push Docker image (only if rust-checks passes)
   docker-build:
