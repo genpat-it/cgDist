@@ -1,0 +1,60 @@
+#!/bin/sh
+# Pre-push hook: reject pushes whose commits mention Claude / Anthropic.
+#
+# Activated via:
+#   git config core.hooksPath .githooks
+#
+# Why: keep public commit history free of AI-assistant attribution per
+# the project author's preference. Catches the standard trailers
+# ("Co-Authored-By: Claude ...", "Generated with Claude Code", etc.)
+# and any URL-based fingerprint (anthropic.com, claude.com, claude.ai).
+#
+# To bypass intentionally (NOT recommended): `git push --no-verify`.
+
+zero=0000000000000000000000000000000000000000
+
+# Read pushed refs from stdin, in the format documented in `man githooks`:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+fail=0
+while read local_ref local_sha remote_ref remote_sha; do
+    # Skip deletions
+    if [ "$local_sha" = "$zero" ]; then
+        continue
+    fi
+
+    # Determine commit range to check
+    if [ "$remote_sha" = "$zero" ]; then
+        # New branch — check up to first commit reachable from any other ref
+        commits=$(git rev-list --reverse "$local_sha" --not --branches --remotes)
+        # Fallback: if the above is empty, it means the branch already exists
+        # somewhere (e.g. another remote). Check all commits reachable from local_sha.
+        if [ -z "$commits" ]; then
+            commits=$(git rev-list "$local_sha")
+        fi
+    else
+        commits=$(git rev-list "${remote_sha}..${local_sha}")
+    fi
+
+    for sha in $commits; do
+        msg=$(git log -1 --pretty=%B "$sha")
+        if printf '%s' "$msg" | grep -qiE 'co-authored-by:[[:space:]]*claude|generated with[[:space:]]+\[?claude|anthropic\.com|claude\.com|claude\.ai'; then
+            short=$(git log -1 --pretty='%h %s' "$sha")
+            echo "ERROR: commit $short contains AI-assistant attribution; push rejected." >&2
+            fail=1
+        fi
+    done
+done
+
+if [ $fail -ne 0 ]; then
+    echo "" >&2
+    echo "Fix: run an interactive rebase to remove the offending trailers, e.g." >&2
+    echo "  git rebase -i \"\$(git merge-base HEAD origin/HEAD)\"" >&2
+    echo "or for a global cleanup:" >&2
+    echo "  FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --msg-filter \\" >&2
+    echo "    'sed -e \"/co-authored-by:.*claude/Id\" -e \"/generated with.*claude/Id\" -e \"/anthropic.com/d\" -e \"/claude.com/d\" -e \"/claude.ai/d\"' HEAD" >&2
+    echo "" >&2
+    echo "Then retry the push." >&2
+    exit 1
+fi
+
+exit 0
