@@ -48,8 +48,10 @@ def create_test_cases():
         ]
     }
     
-    # Create schema directory
+    # Create schema and profiles directories
     os.makedirs('schema_crc32', exist_ok=True)
+    os.makedirs('profiles', exist_ok=True)
+    os.makedirs('results', exist_ok=True)
     
     # Create FASTA files and collect CRC32 hashes
     hashes = {}

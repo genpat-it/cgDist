@@ -4,3 +4,7 @@
 target/
 .claude
 CLAUDE.md
+
+# Validation test fixtures must be tracked so the validation pipeline is
+# reproducible from a fresh clone (R1Mj#4 + R2#1, NARGAB-2026-009 revision).
+!validation_test/profiles/test_profiles_crc32.tsv
