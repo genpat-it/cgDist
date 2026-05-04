@@ -1,0 +1,49 @@
+# cgdist-config.toml — canonical sample configuration for cgDist (alignment-based mode).
+#
+# This file is OPTIONAL: every parameter can be specified on the command
+# line via the corresponding CLI flag. CLI flags override TOML values
+# when both are provided.
+#
+# The structure mirrors examples/hamming-config.toml (NARGAB-2026-009 R1Mn#1).
+# All keys are flat (no [sections]). To regenerate this file, run:
+#
+#     cgdist --generate-config
+
+# ---- Input/Output ----
+profiles = "profiles.tsv"            # allelic profile matrix (.tsv or .csv)
+schema = "schema/"                   # FASTA schema directory (one file per locus)
+output = "distances.tsv"             # output distance matrix
+
+# ---- Core settings ----
+hasher_type = "crc32"                # crc32, sha256, md5, sequence, hamming
+mode = "snps"                        # snps, snps-indel-contiguous, snps-indel-bases, hamming
+                                     # (legacy alias snps-indel-events == snps-indel-contiguous, R1#2b)
+format = "tsv"                       # tsv, csv, phylip, nexus
+missing_char = "-"
+
+# ---- Performance ----
+threads = 1                          # default since v0.2.0 (R1Mj#3); set to 0 for auto-detect
+cache_file = "cache.lz4"             # optional: enable persistent alignment cache
+cache_note = "Example run"
+
+# ---- Quality filters (optional) ----
+sample_threshold = 0.0               # 0.0 = no filter; 0.8 = keep samples with >=80% non-missing loci
+locus_threshold = 0.0                # 0.0 = no filter
+min_loci = 0                         # minimum shared loci required for a pairwise distance
+
+# ---- Alignment (ignored for hamming hasher) ----
+alignment_mode = "dna"               # dna, dna-strict, dna-permissive, custom
+# match_score = 2
+# mismatch_penalty = -1
+# gap_open = 5
+# gap_extend = 2
+
+# ---- Flags ----
+hamming_fallback = false             # opt-in since v0.2.0 (NARGAB-2026-009 R1#6).
+                                     # When enabled, allele pairs with 0 SNPs but different
+                                     # hashes (InDel-only differences) contribute +1 instead
+                                     # of 0 in SNPs-only mode. The +1 is a design-preserving
+                                     # placeholder, not an inferred SNP count.
+force_recompute = false
+dry_run = false
+# save_alignments = "alignments.tsv"

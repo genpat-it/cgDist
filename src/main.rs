@@ -36,6 +36,40 @@ fn run_main() -> Result<(), String> {
     let mut args: Args = argh::from_env();
     let command_line = std::env::args().collect::<Vec<String>>().join(" ");
 
+    // ---- v0.2.0 deprecation warnings & alias normalization ----
+    // (NARGAB-2026-009 revision: R1#2b mode rename, R1#3 flag rename, R1#6 fallback opt-in)
+    if args.mode.eq_ignore_ascii_case("snps-indel-events")
+        || args.mode.eq_ignore_ascii_case("snps+indel-events")
+    {
+        eprintln!(
+            "⚠️  Note: --mode {} is a deprecated alias for --mode snps-indel-contiguous. \
+             The legacy name is still accepted; please update your scripts.",
+            args.mode
+        );
+    }
+    if args.recombination_log.is_some() && args.candidate_recombination_log.is_none() {
+        eprintln!(
+            "⚠️  Note: --recombination-log is a deprecated alias for \
+             --candidate-recombination-log. The legacy name is still accepted; \
+             please update your scripts."
+        );
+        args.candidate_recombination_log = args.recombination_log.clone();
+    }
+    if args.no_hamming_fallback {
+        eprintln!(
+            "⚠️  Note: --no-hamming-fallback is now a no-op. Since v0.2.0 the Hamming fallback \
+             is opt-in via --hamming-fallback (default disabled), so explicitly disabling it is \
+             redundant. The flag is accepted for backward compatibility."
+        );
+    }
+    if args.hamming_fallback {
+        eprintln!(
+            "⚠️  Note: --hamming-fallback is active. In SNPs-only mode, allele pairs with 0 SNPs \
+             but different hashes (i.e. InDel-only differences) will contribute +1 instead of 0. \
+             The +1 is a design-preserving placeholder, not an inferred SNP count."
+        );
+    }
+
     // Handle generate config first
     if args.generate_config {
         let sample_config = Config::generate_sample();
@@ -78,16 +112,24 @@ fn run_main() -> Result<(), String> {
     println!("🚀 cgDist v{}", env!("CARGO_PKG_VERSION"));
     println!("⚡ Strategy: Pre-compute unique pairs → Batch Parasail → Fast assembly");
 
-    // Configure thread pool
-    if let Some(n) = args.threads {
+    // Configure thread pool. Default since v0.2.0 (NARGAB-2026-009 R1Mj#3) is 1 thread:
+    // on shared systems, auto-detection can interfere with other processes. Users who want
+    // the previous behaviour can pass `--threads 0` for auto-detect, or `--threads N` to
+    // request a specific number.
+    let requested_threads = args.threads.unwrap_or(1);
+    if requested_threads == 0 {
+        let num_threads = rayon::current_num_threads();
+        println!("🧵 Threads: {} (auto-detected via --threads 0)", num_threads);
+    } else {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(n)
+            .num_threads(requested_threads)
             .build_global()
             .expect("Failed to configure thread pool");
-        println!("🧵 Threads: {}", n);
-    } else {
-        let num_threads = rayon::current_num_threads();
-        println!("🧵 Threads: {} (auto-detected)", num_threads);
+        println!(
+            "🧵 Threads: {}{}",
+            requested_threads,
+            if args.threads.is_none() { " (default; pass --threads N or 0 for auto-detect)" } else { "" }
+        );
     }
 
     // Initialize hasher registry and validate hasher type
@@ -183,10 +225,10 @@ fn run_main() -> Result<(), String> {
         println!(
             "\n🎯 Distance calculation mode: {} ({})",
             validation_result.distance_mode.description(),
-            if args.no_hamming_fallback {
-                "no Hamming fallback"
+            if args.hamming_fallback {
+                "Hamming fallback enabled (opt-in)"
             } else {
-                "Hamming fallback enabled"
+                "no Hamming fallback (default since v0.2.0)"
             }
         );
     }
@@ -375,16 +417,18 @@ fn run_main() -> Result<(), String> {
         return Ok(());
     }
 
-    // Set recombination detection if requested (TODO: implement)
-    if let Some(ref _log_path) = args.recombination_log {
-        // TODO: Implement recombination detection
+    // Set candidate-region recombination flagging if requested (TODO: implement)
+    if let Some(ref _log_path) = args.candidate_recombination_log {
+        // TODO: Implement candidate-region flagging
         println!(
-            "🧬 Recombination detection requested (threshold: {} bp) - not implemented yet",
+            "🧬 Candidate-region flagging requested (threshold: {} bp) - not implemented yet",
             args.recombination_threshold
         );
     }
 
-    // Calculate distance matrix
+    // Calculate distance matrix.
+    // The internal `no_hamming_fallback` parameter is the inverse of the new opt-in flag:
+    // pass true when the user has NOT requested fallback (the new v0.2.0 default).
     println!("\n🔄 Computing distance matrix...");
     let distance_matrix = calculate_distance_matrix(
         &matrix.samples,
@@ -392,7 +436,7 @@ fn run_main() -> Result<(), String> {
         &engine,
         validation_result.distance_mode,
         args.min_loci,
-        args.no_hamming_fallback,
+        !args.hamming_fallback,
     );
 
     // Write output
@@ -458,9 +502,11 @@ fn run_main() -> Result<(), String> {
         eprintln!("⚠️  Warning: Failed to save alignment details: {}", e);
     }
 
-    // Save recombination log if specified (TODO: implement)
-    if let Some(ref _log_path) = args.recombination_log {
-        println!("⚠️  Recombination log saving not implemented yet");
+    // Save candidate-region flagging log if specified (TODO: implement).
+    // candidate_recombination_log was already aliased from the deprecated --recombination-log
+    // earlier in run_main(), so checking the canonical field is sufficient here.
+    if let Some(ref _log_path) = args.candidate_recombination_log {
+        println!("⚠️  Candidate-region flagging log saving not implemented yet");
     }
 
     // Print summary

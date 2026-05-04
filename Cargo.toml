@@ -2,7 +2,11 @@
 name = "cgdist"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.70"
 description = "Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis"
+readme = "README.md"
+homepage = "https://github.com/genpat-it/cgDist"
+documentation = "https://docs.rs/cgdist"
 authors = [
     "Andrea de Ruvo <andrea.deruvo@gssi.it>",
     "Pierluigi Castelli <p.castelli@izs.it>",
@@ -18,6 +22,13 @@ license = "MIT"
 repository = "https://github.com/genpat-it/cgDist"
 keywords = ["bioinformatics", "genomics", "mlst", "alignment", "distance"]
 categories = ["science", "command-line-utilities"]
+exclude = [
+    "validation_test/results/*.tsv",
+    "validation_test/results/*.lz4",
+    "target/",
+    ".github/",
+    "Dockerfile",
+]
 
 # ============================================================================
 # DEPENDENCIES - ONLY WHAT'S NEEDED FOR cgdist.rs

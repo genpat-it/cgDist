@@ -99,10 +99,14 @@ impl FromStr for DistanceMode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "snps" | "snps-only" => Ok(DistanceMode::SnpsOnly),
-            "snps-indel-events" | "snps+indel-events" => Ok(DistanceMode::SnpsAndIndelEvents),
+            // "snps-indel-contiguous" is the primary name (manuscript terminology, NARGAB-2026-009 R1#2b).
+            // "snps-indel-events" / "snps+indel-events" are kept as backward-compat aliases.
+            "snps-indel-contiguous" | "snps-indel-events" | "snps+indel-events" => {
+                Ok(DistanceMode::SnpsAndIndelEvents)
+            }
             "snps-indel-bases" | "snps+indel-bases" => Ok(DistanceMode::SnpsAndIndelBases),
             "hamming" => Ok(DistanceMode::Hamming),
-            _ => Err(format!("Invalid distance mode: {}. Use: snps, snps-indel-events, snps-indel-bases, hamming", s))
+            _ => Err(format!("Invalid distance mode: {}. Use: snps, snps-indel-contiguous, snps-indel-bases, hamming", s))
         }
     }
 }

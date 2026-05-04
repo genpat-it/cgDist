@@ -38,8 +38,15 @@ cgDist is a high-performance Rust implementation for calculating genetic distanc
 
 ### Prerequisites
 
-- Rust 1.70+ (install from [rustup.rs](https://rustup.rs/))
-- Python 3.8+ (for analysis scripts)
+- Rust **1.70 or later** (the minimum supported Rust version, MSRV, is also declared in `Cargo.toml`). The easiest way to install or update Rust is via [rustup.rs](https://rustup.rs/):
+  ```bash
+  # Install rustup (skip if already installed)
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+  # If rustup is already installed but Rust is older than 1.70, update with:
+  rustup update stable
+  ```
+- Python 3.8+ (only for the validation scripts in `validation_test/`)
 
 ### From Source
 
@@ -56,9 +63,19 @@ cargo build --release
 
 ### Using Cargo
 
+`cgdist` is published on crates.io, so you can install it directly with:
+
 ```bash
 cargo install cgdist
 ```
+
+This installs the `cgdist`, `inspector`, and `recombination_analyzer`
+binaries to `~/.cargo/bin/` (which should be on your `PATH` after a
+default rustup install). Note: cgdist is a binary crate, so its
+`Cargo.lock` is committed to the repository to guarantee reproducible
+builds — this is the convention recommended in the
+[official Cargo FAQ](https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control)
+for binary crates.
 
 ### Docker
 
@@ -104,8 +121,8 @@ SNPs+InDel-events, SNPs+InDel-bases), checks the mathematical invariant
 # After building cgDist (see Installation)
 cd validation_test
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_hamming.tsv --mode hamming --hasher-type crc32
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv --mode snps --hasher-type crc32
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_events.tsv --mode snps-indel-events --hasher-type crc32
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv --mode snps --hasher-type crc32 --hamming-fallback
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_events.tsv --mode snps-indel-contiguous --hasher-type crc32
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_bases.tsv --mode snps-indel-bases --hasher-type crc32
 
 # Verify expected results
@@ -122,29 +139,57 @@ pull request (see `.github/workflows/ci-and-docker.yml`).
 
 ### Configuration File
 
-Create a `cgdist-config.toml` file:
+A configuration file is **optional**: every parameter accepted by `cgdist` also has
+a CLI flag. The configuration file simply lets you persist commonly-used
+settings without retyping them. **CLI flags always override TOML values
+when both are provided.**
+
+A canonical example is shipped at
+[`examples/cgdist-config.toml`](examples/cgdist-config.toml); a
+Hamming-mode variant is at
+[`examples/hamming-config.toml`](examples/hamming-config.toml). Both
+files use the same flat key structure (no `[sections]`), and the same
+key names as the corresponding CLI flags (the only normalization is
+that CLI flag dashes become underscores in TOML — e.g. `--hasher-type`
+becomes `hasher_type`).
+
+You can also generate a fresh annotated sample with:
+
+```bash
+cgdist --generate-config > cgdist-config.toml
+```
+
+A minimal example (alignment-based mode):
 
 ```toml
-[general]
+profiles = "profiles.tsv"
+schema = "schema/"
+output = "distances.tsv"
 hasher_type = "crc32"
-threads = 8
-cache_file = "./cache/cgdist_cache.lz4"
-missing_char = "-"
-
-[filtering]
-min_loci = 0
-sample_threshold = 0.0
-locus_threshold = 0.0
-
-[output]
+mode = "snps"            # legacy alias snps-indel-events == snps-indel-contiguous (deprecated)
 format = "tsv"
-mode = "snps"
+missing_char = "-"
+threads = 1              # default since v0.2.0; set to 0 for auto-detect
+hamming_fallback = false # opt-in since v0.2.0 (see Hamming Fallback section below)
 ```
 
 ```bash
-# Use configuration file
-cgdist --schema schema_dir/ --profiles profiles.tsv --config cgdist-config.toml --output distances.tsv
+# Use a configuration file
+cgdist --config cgdist-config.toml
+
+# CLI overrides example: config says threads=1, but the CLI wins → 16 threads used
+cgdist --config cgdist-config.toml --threads 16
 ```
+
+#### CLI vs TOML precedence (R1Mn#3)
+
+When both the configuration file and the command line specify the same
+parameter, the **command-line value wins**. Internally this is
+implemented by loading the TOML first, then overlaying any CLI flag
+that the user explicitly set. The same rule applies to switches: e.g.
+if the TOML says `hamming_fallback = false` but you pass
+`--hamming-fallback` on the command line, the fallback will be enabled
+for that run.
 
 ## 📊 Usage
 

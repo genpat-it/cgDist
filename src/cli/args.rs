@@ -17,7 +17,8 @@ pub struct Args {
     #[argh(option)]
     pub output: Option<String>,
 
-    /// distance mode: snps, snps-indel-events, snps-indel-bases, hamming (default: snps)
+    /// distance mode: snps, snps-indel-contiguous, snps-indel-bases, hamming (default: snps).
+    /// Legacy alias: snps-indel-events == snps-indel-contiguous (deprecated).
     #[argh(option, default = "String::from(\"snps\")")]
     pub mode: String,
 
@@ -33,7 +34,10 @@ pub struct Args {
     #[argh(option, default = "0")]
     pub min_loci: usize,
 
-    /// number of threads (default: auto-detect)
+    /// number of threads (default: 1; pass 0 for auto-detect = number of physical cores).
+    /// Default changed in v0.2.0 from auto-detect to 1 (NARGAB-2026-009 R1Mj#3): on shared
+    /// systems, auto-detect can interfere with other processes; users running on dedicated
+    /// hardware should explicitly request the desired number of threads.
     #[argh(option)]
     pub threads: Option<usize>,
 
@@ -77,7 +81,15 @@ pub struct Args {
     #[argh(option)]
     pub exclude_samples_list: Option<String>,
 
-    /// disable Hamming fallback for SNPs-only mode (default: enabled for SNPs mode, N/A for indel modes)
+    /// enable Hamming fallback for SNPs-only mode (opt-in: when an allele pair has 0 SNPs but
+    /// different hashes due to InDels, contribute +1 instead of 0; preserves cgDist >= Hamming
+    /// ordering at the cost of counting non-SNP positions as "SNPs"). Default: disabled.
+    #[argh(switch)]
+    pub hamming_fallback: bool,
+
+    /// [DEPRECATED] no longer needed: Hamming fallback is now opt-in via --hamming-fallback.
+    /// This flag is accepted for backward compatibility and is a no-op (a warning is printed
+    /// when supplied).
     #[argh(switch)]
     pub no_hamming_fallback: bool,
 
@@ -129,7 +141,15 @@ pub struct Args {
     #[argh(switch)]
     pub cache_only: bool,
 
-    /// detect potential recombination events: output log of allele pairs exceeding threshold
+    /// flag candidate recombination regions: output log of allele pairs whose mutation density
+    /// exceeds --recombination-threshold. This is a heuristic flagging step, not a validated
+    /// recombination detection method (see Supplementary Methods §S6 of the cgDist paper).
+    /// Primary name (NARGAB-2026-009 R1#3); legacy alias --recombination-log is also accepted.
+    #[argh(option)]
+    pub candidate_recombination_log: Option<String>,
+
+    /// [DEPRECATED ALIAS] use --candidate-recombination-log instead. Kept for backward
+    /// compatibility; a deprecation warning is printed when this name is used.
     #[argh(option)]
     pub recombination_log: Option<String>,
 

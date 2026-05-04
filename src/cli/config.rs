@@ -45,6 +45,10 @@ pub struct Config {
     pub gap_extend: Option<i32>,
 
     // Flags
+    /// Opt-in Hamming fallback for SNPs-only mode (default: false). NARGAB-2026-009 R1#6.
+    pub hamming_fallback: Option<bool>,
+    /// [DEPRECATED] kept for backward compatibility. With the new opt-in semantics
+    /// (hamming_fallback default = false), this flag is a no-op.
     pub no_hamming_fallback: Option<bool>,
     pub force_recompute: Option<bool>,
     pub dry_run: Option<bool>,
@@ -81,6 +85,7 @@ impl Config {
             mismatch_penalty: None,
             gap_open: None,
             gap_extend: None,
+            hamming_fallback: None,
             no_hamming_fallback: None,
             force_recompute: None,
             dry_run: None,
@@ -139,7 +144,8 @@ output = "distances.tsv"
 # Allele hasher type: crc32, sha256, md5, sequence, hamming
 hasher_type = "crc32"
 
-# Distance mode: snps, snps-indel-events, snps-indel-bases, hamming
+# Distance mode: snps, snps-indel-contiguous, snps-indel-bases, hamming
+# Legacy alias: snps-indel-events == snps-indel-contiguous (deprecated, NARGAB-2026-009 R1#2b)
 # Note: ignored when hasher_type = "hamming"
 mode = "snps"
 
@@ -153,8 +159,8 @@ missing_char = "-"
 # PERFORMANCE
 # =============================================================================
 
-# Number of threads (omit for auto-detection)
-threads = 128
+# Number of threads (default: 1 in v0.2.0+; set to 0 for auto-detection = number of cores)
+threads = 1
 
 # Cache file path for ultra-fast reuse (.lz4 extension)
 # Note: not used with hamming hasher
@@ -221,8 +227,15 @@ alignment_mode = "dna"
 # FLAGS
 # =============================================================================
 
-# Disable Hamming fallback for SNPs-only mode
-no_hamming_fallback = false
+# Enable Hamming fallback for SNPs-only mode (opt-in since v0.2.0, NARGAB-2026-009 R1#6).
+# When enabled and an allele pair has 0 SNPs but different hashes (because of InDels),
+# contribute +1 instead of 0. Preserves cgDist >= Hamming ordering at the cost of
+# counting non-SNP positions as "SNPs".
+hamming_fallback = false
+
+# [DEPRECATED] no_hamming_fallback is now a no-op (the default behavior since v0.2.0
+# is "no fallback"; use hamming_fallback = true to opt in). Kept for backward compatibility.
+# no_hamming_fallback = false
 
 # Force recomputation ignoring cache compatibility
 force_recompute = false

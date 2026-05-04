@@ -96,10 +96,16 @@ impl Args {
             self.gap_extend = config.gap_extend;
         }
 
-        // Flags (CLI flags take precedence, config only sets if not explicitly set)
-        if !self.no_hamming_fallback && config.no_hamming_fallback.unwrap_or(false) {
-            self.no_hamming_fallback = true;
+        // Flags (CLI flags take precedence, config only sets if not explicitly set).
+        // hamming_fallback is opt-in since v0.2.0 (NARGAB-2026-009 R1#6); CLI flag wins,
+        // otherwise honour the config value (default false).
+        if !self.hamming_fallback && config.hamming_fallback.unwrap_or(false) {
+            self.hamming_fallback = true;
         }
+        // [DEPRECATED] config.no_hamming_fallback is accepted but no longer alters behaviour
+        // (the new default is "no fallback"). It is read here only to suppress the unused-field
+        // warning; a deprecation note is printed in main.rs when the legacy CLI flag is set.
+        let _ = config.no_hamming_fallback;
         if !self.force_recompute && config.force_recompute.unwrap_or(false) {
             self.force_recompute = true;
         }

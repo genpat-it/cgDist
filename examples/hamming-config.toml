@@ -1,9 +1,31 @@
-profiles = "/home/IZSNT/a.deruvo/cgdist-resources/paper/listeria_beone/profiles/results_20250424T094954/results_alleles_hashed.tsv"
-schema = "/home/IZSNT/a.deruvo/cgdist-resources/paper/listeria_beone/schema/"
-output = "listeria_test_snps_indel_events.tsv"
-threads = 128
-mode = "snps-indel-events"
-cache_file = "listeria.lz4"
-cache_note = "my listeria cache"
-alignment_mode = "dna-strict"
-hashery_type = "crc32"
+# hamming-config.toml — example configuration for the Hamming hasher.
+#
+# In Hamming mode, distances are computed at the allelic level (no FASTA
+# schema or sequence alignment is needed). This is the fastest mode but
+# also the coarsest: it ignores within-allele nucleotide variation.
+#
+# The structure of this file mirrors the canonical cgdist configuration
+# (see examples/cgdist-config.toml and the "Configuration File" section
+# of the top-level README). All keys are flat (no [sections]).
+#
+# All options here also have CLI flags. CLI flags override TOML values
+# when both are provided. The config file is OPTIONAL: every parameter
+# can be specified on the command line.
+
+# ---- Input/Output ----
+profiles = "profiles.tsv"
+output = "distances_hamming.tsv"
+
+# ---- Core settings ----
+hasher_type = "hamming"      # NOTE: was previously "hashery_type" — typo fixed in v0.2.0 (R1Mn#1a)
+mode = "hamming"             # in Hamming hasher mode this is the only valid mode
+format = "tsv"               # tsv, csv, phylip, nexus
+missing_char = "-"
+
+# ---- Performance ----
+threads = 1                  # default since v0.2.0; set to 0 for auto-detect
+
+# ---- Quality filters (optional) ----
+sample_threshold = 0.0
+locus_threshold = 0.0
+min_loci = 0
