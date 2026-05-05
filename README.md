@@ -61,21 +61,35 @@ cargo build --release
 # The binary will be available at ./target/release/cgdist
 ```
 
-### Using Cargo
+### Using Cargo (install directly from GitHub)
 
-`cgdist` is published on crates.io, so you can install it directly with:
+`cgdist` can be installed directly from GitHub via Cargo, without a
+crates.io publication step. To install the version corresponding to a
+specific tag (recommended for reproducibility, e.g. when reviewing or
+citing a manuscript revision):
 
 ```bash
-cargo install cgdist
+cargo install --git https://github.com/genpat-it/cgDist --tag submitted-NARGAB-2026-009-R1
 ```
 
-This installs the `cgdist`, `inspector`, and `recombination_analyzer`
-binaries to `~/.cargo/bin/` (which should be on your `PATH` after a
-default rustup install). Note: cgdist is a binary crate, so its
-`Cargo.lock` is committed to the repository to guarantee reproducible
-builds — this is the convention recommended in the
+To install the latest state on the default branch:
+
+```bash
+cargo install --git https://github.com/genpat-it/cgDist
+```
+
+Either command installs the `cgdist`, `inspector`, and
+`recombination_analyzer` binaries to `~/.cargo/bin/` (which should be on
+your `PATH` after a default rustup install). Note: cgdist is a binary
+crate, so its `Cargo.lock` is committed to the repository to guarantee
+reproducible builds — this is the convention recommended in the
 [official Cargo FAQ](https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control)
 for binary crates.
+
+A formal crates.io release is planned for v0.2.0 once the manuscript
+describing this version is accepted (`cargo publish` is irreversible
+per version, so we publish only when the version of record is final).
+After that, `cargo install cgdist` will be the simplest install path.
 
 ### Docker
 
