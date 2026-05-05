@@ -1,0 +1,11 @@
+*.tsv
+*.lz4
+*.txt
+target/
+.claude
+CLAUDE.md
+.tmp-validation/
+
+# Validation test fixtures must be tracked so the validation pipeline is
+# reproducible from a fresh clone.
+!validation_test/profiles/test_profiles_crc32.tsv

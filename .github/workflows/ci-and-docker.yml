@@ -1,0 +1,129 @@
+name: CI and Docker Build
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master, main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # First job: Run all Rust checks
+  rust-checks:
+    name: Rust CI (Build, Test, Clippy, Format)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Check formatting
+      run: cargo fmt -- --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Build release (for validation smoke test)
+      run: cargo build --release
+
+    - name: Run tests
+      run: cargo test --verbose
+
+    - name: Set up Python (for validation suite)
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Install validation Python deps
+      run: pip install pandas
+
+    - name: Run end-to-end validation smoke test
+      working-directory: validation_test
+      run: |
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_hamming.tsv             --mode hamming             --hasher-type crc32
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv                --mode snps                       --hasher-type crc32 --hamming-fallback
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_events.tsv   --mode snps-indel-contiguous      --hasher-type crc32
+        ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_bases.tsv    --mode snps-indel-bases    --hasher-type crc32
+        python3 run_validation.py
+
+  # Second job: Build and push Docker image (only if rust-checks passes)
+  docker-build:
+    name: Build and Push Docker Image
+    needs: rust-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Image digest
+        run: echo "Image pushed successfully"
