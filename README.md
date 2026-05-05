@@ -30,7 +30,6 @@ cgDist is a high-performance Rust implementation for calculating genetic distanc
 - [Custom Hashers Plugin System](#-custom-hashers-plugin-system)
 - [API Documentation](#-api-documentation)
 - [Citation](#-citation)
-- [Related Repositories](#-related-repositories)
 - [Support](#-support)
 - [License](#-license)
 
@@ -797,10 +796,6 @@ If you use cgDist in your research, please cite our preprint:
   note = {Preprint. Software: https://github.com/genpat-it/cgDist}
 }
 ```
-
-## 🔗 Related Repositories
-
-- **📊 Comprehensive Study**: [cgDist-study](https://github.com/genpat-it/cgDist-study) - Complete epidemiological analysis and performance benchmarks
 
 ## 📞 Support
 
