@@ -65,7 +65,7 @@ def manual_sequence_analysis():
     expected_distances[('Sample_Ref', 'Sample_SNPs_Only')] = {
         'hamming': 3,
         'snps': 4,
-        'snps_indel_events': 4,
+        'snps_indel_contiguous': 4,
         'snps_indel_bases': 4
     }
     
@@ -77,7 +77,7 @@ def manual_sequence_analysis():
     expected_distances[('Sample_Ref', 'Sample_Dels_Only')] = {
         'hamming': 3,
         'snps': 3,  # Hamming fallback
-        'snps_indel_events': 3,  # 0 SNPs + 3 InDel events
+        'snps_indel_contiguous': 3,  # 0 SNPs + 3 InDel events
         'snps_indel_bases': 4   # 0 SNPs + 4 InDel bases
     }
     
@@ -89,7 +89,7 @@ def manual_sequence_analysis():
     expected_distances[('Sample_Ref', 'Sample_Ins_Only')] = {
         'hamming': 3,
         'snps': 3,  # Hamming fallback
-        'snps_indel_events': 3,  # 0 SNPs + 3 InDel events
+        'snps_indel_contiguous': 3,  # 0 SNPs + 3 InDel events
         'snps_indel_bases': 7   # 0 SNPs + 7 InDel bases
     }
     
@@ -102,7 +102,7 @@ def validate_cgdist():
     matrices = {
         'hamming': load_distance_matrix('results/crc32_hamming.tsv'),
         'snps': load_distance_matrix('results/crc32_snps.tsv'),
-        'snps_indel_events': load_distance_matrix('results/crc32_snps_indel_events.tsv'),
+        'snps_indel_contiguous': load_distance_matrix('results/crc32_snps_indel_contiguous.tsv'),
         'snps_indel_bases': load_distance_matrix('results/crc32_snps_indel_bases.tsv')
     }
     

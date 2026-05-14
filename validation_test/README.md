@@ -100,7 +100,7 @@ python3 setup_validation_test.py
 
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv --mode snps --hasher-type crc32 --hamming-fallback
 
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_events.tsv --mode snps-indel-contiguous --hasher-type crc32
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_contiguous.tsv --mode snps-indel-contiguous --hasher-type crc32
 
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_bases.tsv --mode snps-indel-bases --hasher-type crc32
 

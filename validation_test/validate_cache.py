@@ -49,7 +49,7 @@ def validate_cache_consistency():
     distance_modes = [
         ("hamming", "Hamming distance"),
         ("snps", "SNPs only"), 
-        ("snps-indel-events", "SNPs + InDel events"),
+        ("snps-indel-contiguous", "SNPs + InDel-contiguous"),
         ("snps-indel-bases", "SNPs + InDel bases")
     ]
     

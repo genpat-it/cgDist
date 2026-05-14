@@ -48,6 +48,26 @@ cgDist is a high-performance Rust implementation for calculating genetic distanc
   rustup update stable
   ```
 - Python 3.8+ (only for the validation scripts in `validation_test/`)
+- **System build dependencies for `parasail-rs`**: the alignment backend
+  is built from C source via CMake, which requires a C compiler and
+  `zlib` development headers. Install once per machine:
+  ```bash
+  # Debian / Ubuntu / WSL
+  sudo apt install build-essential cmake zlib1g-dev
+
+  # RHEL / AlmaLinux / Rocky / CentOS / Fedora
+  sudo dnf install gcc gcc-c++ cmake zlib-devel
+
+  # macOS (Homebrew; Xcode Command Line Tools provide compiler + zlib)
+  xcode-select --install
+  brew install cmake
+  ```
+  Windows users are encouraged to use the [Docker
+  image](#-docker-install-pre-built-on-ghcr) or
+  [WSL2](https://learn.microsoft.com/windows/wsl/install), which provide
+  a ready-to-build Linux environment. Native Windows builds additionally
+  require zlib via [vcpkg](https://vcpkg.io/) (`vcpkg install zlib`) or
+  MSYS2.
 
 ### From Source
 
@@ -109,17 +129,18 @@ docker pull ghcr.io/genpat-it/cgdist:0.1.1
 # docker pull ghcr.io/genpat-it/cgdist:0.1
 # docker pull ghcr.io/genpat-it/cgdist:latest   # tracks master HEAD
 
-# Run with the image (mount your working directory at /data)
+# Run with the image (mount your working directory at /data).
+# The image's ENTRYPOINT is `cgdist`, so flags are passed directly:
 docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.1.1 \
-    cgdist --schema /data/schema_dir --profiles /data/profiles.tsv \
-           --output /data/distances.tsv --mode snps-indel-bases
+    --schema /data/schema_dir --profiles /data/profiles.tsv \
+    --output /data/distances.tsv --mode snps-indel-bases
 ```
 
 To build the image locally instead of pulling (useful for development):
 
 ```bash
 docker build -t cgdist:dev .
-docker run --rm -v $(pwd):/data cgdist:dev cgdist --help
+docker run --rm -v $(pwd):/data cgdist:dev --help
 ```
 
 ## 🚀 Quick Start
@@ -157,7 +178,7 @@ SNPs+InDel-events, SNPs+InDel-bases), checks the mathematical invariant
 cd validation_test
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_hamming.tsv --mode hamming --hasher-type crc32
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv --mode snps --hasher-type crc32 --hamming-fallback
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_events.tsv --mode snps-indel-contiguous --hasher-type crc32
+../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_contiguous.tsv --mode snps-indel-contiguous --hasher-type crc32
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_bases.tsv --mode snps-indel-bases --hasher-type crc32
 
 # Verify expected results
@@ -266,7 +287,7 @@ ALIGNMENT OPTIONS:
     --save-alignments <FILE>   Save detailed alignments to TSV file
 
 PERFORMANCE OPTIONS:
-    --threads <N>              Number of threads [default: auto-detect]
+    --threads <N>              Number of threads [default: 1; pass 0 for auto-detect]
     --cache-file <FILE>        Cache file path (.lz4 extension)
     --cache-note <TEXT>        Note to save with cache
     --cache-only               Build cache only without computing distance matrix
@@ -391,9 +412,14 @@ cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
 
 ### Input Requirements
 
+cgDist consumes standard cgMLST outputs. Profiles and schemas can be
+generated, for example, with [ChewBBACA](https://github.com/B-UMMI/chewBBACA)
+(Silva et al. 2018) or downloaded from [Chewie-NS](https://chewbbaca.online/)
+(Mamede et al. 2020).
+
 **For Tool 1 (Built-in Flagging)**:
-1. **Schema**: FASTA directory with allele sequences
-2. **Profiles**: TSV/CSV file with sample-locus-allele matrix
+1. **Schema**: FASTA directory with allele sequences (e.g. ChewBBACA schema directory)
+2. **Profiles**: TSV/CSV file with sample-locus-allele matrix (e.g. ChewBBACA `results_alleles.tsv`)
 
 **For Tool 2 (Recombination-Candidate Analyzer)**:
 1. **Enriched Cache**: `.bin` file generated with `--enrich-lengths` option
