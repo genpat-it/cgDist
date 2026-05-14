@@ -1,5 +1,6 @@
 # cgDist 🧬
 
+[![Crates.io](https://img.shields.io/crates/v/cgdist.svg?logo=rust)](https://crates.io/crates/cgdist)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/genpat-it/cgDist/actions/workflows/ci-and-docker.yml/badge.svg)](https://github.com/genpat-it/cgDist/actions/workflows/ci-and-docker.yml)
@@ -82,40 +83,47 @@ cargo build --release
 # The binary will be available at ./target/release/cgdist
 ```
 
-### Using Cargo (install directly from GitHub)
-
-`cgdist` can be installed directly from GitHub via Cargo, without a
-crates.io publication step. To install a specific version tag
-(recommended for reproducibility, e.g. when reviewing or citing the
-manuscript):
+### Install from crates.io (recommended)
 
 ```bash
-cargo install --git https://github.com/genpat-it/cgDist --tag v0.1.1 cgdist
+cargo install cgdist
 ```
 
-To install the latest state on the default branch:
+This fetches the latest published release from
+[crates.io](https://crates.io/crates/cgdist), builds it locally with
+your stable Rust toolchain, and installs the `cgdist`, `inspector`,
+and `recombination_candidate_analyzer` binaries to `~/.cargo/bin/`
+(which should already be on your `PATH` after a default rustup
+install). The deprecated `recombination_analyzer` binary is also
+installed and forwards every argument to
+`recombination_candidate_analyzer` with a deprecation notice — existing
+scripts continue to work.
+
+To pin a specific published version:
 
 ```bash
+cargo install cgdist --version 0.1.1
+```
+
+### Install from GitHub (specific tag or unreleased commits)
+
+To install directly from the GitHub repository — useful for installing
+an unreleased commit or for fully self-contained reproducibility when
+citing the manuscript:
+
+```bash
+# Specific release tag
+cargo install --git https://github.com/genpat-it/cgDist --tag v0.1.1 cgdist
+
+# Latest state on the default branch
 cargo install --git https://github.com/genpat-it/cgDist cgdist
 ```
-
-Either command installs the `cgdist`, `inspector`, and
-`recombination_candidate_analyzer` binaries to `~/.cargo/bin/` (which
-should be on your `PATH` after a default rustup install). The
-deprecated `recombination_analyzer` binary is also installed and
-forwards every argument to `recombination_candidate_analyzer` with a
-deprecation notice — existing scripts continue to work.
 
 cgdist is a binary crate, so its `Cargo.lock` is committed to the
 repository to guarantee reproducible builds — this is the convention
 recommended in the
 [official Cargo FAQ](https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control)
 for binary crates.
-
-A formal crates.io publication is planned for a future release
-(`cargo publish` is irreversible per version, so we defer it until the
-package metadata and feature surface have stabilised). After
-publication, `cargo install cgdist` will be the simplest install path.
 
 ### Docker
 
