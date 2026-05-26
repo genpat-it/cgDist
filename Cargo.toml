@@ -2,7 +2,7 @@
 name = "cgdist"
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.88"
 description = "Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis"
 readme = "README.md"
 homepage = "https://github.com/genpat-it/cgDist"

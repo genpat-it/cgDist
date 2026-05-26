@@ -1,7 +1,7 @@
 # cgDist 🧬
 
 [![Crates.io](https://img.shields.io/crates/v/cgdist.svg?logo=rust)](https://crates.io/crates/cgdist)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/genpat-it/cgDist/actions/workflows/ci-and-docker.yml/badge.svg)](https://github.com/genpat-it/cgDist/actions/workflows/ci-and-docker.yml)
 [![GitHub release](https://img.shields.io/github/v/release/genpat-it/cgDist?label=release&color=blue)](https://github.com/genpat-it/cgDist/releases/latest)
@@ -40,12 +40,12 @@ cgDist is a high-performance Rust implementation for calculating genetic distanc
 
 ### Prerequisites
 
-- Rust **1.70 or later** (the minimum supported Rust version, MSRV, is also declared in `Cargo.toml`). The easiest way to install or update Rust is via [rustup.rs](https://rustup.rs/):
+- Rust **1.88 or later** (the minimum supported Rust version, MSRV, is also declared in `Cargo.toml`). The pinned dependency set requires a recent toolchain, so simply using the latest stable Rust is recommended. The easiest way to install or update Rust is via [rustup.rs](https://rustup.rs/):
   ```bash
   # Install rustup (skip if already installed)
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-  # If rustup is already installed but Rust is older than 1.70, update with:
+  # If rustup is already installed but Rust is older than 1.88, update with:
   rustup update stable
   ```
 - Python 3.8+ (only for the validation scripts in `validation_test/`)
@@ -103,6 +103,16 @@ To pin a specific published version:
 
 ```bash
 cargo install cgdist --version 0.1.1
+```
+
+For a fully reproducible build that uses exactly the dependency
+versions we tested against, add `--locked` (this reuses the published
+`Cargo.lock` instead of re-resolving to the newest compatible
+dependencies, which may otherwise require an even more recent Rust
+toolchain):
+
+```bash
+cargo install cgdist --locked
 ```
 
 ### Install from GitHub (specific tag or unreleased commits)

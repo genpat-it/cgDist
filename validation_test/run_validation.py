@@ -5,6 +5,50 @@ Corrected validation script for cgDist with accurate expected values.
 
 import pandas as pd
 import sys
+import os
+import shutil
+import subprocess
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def find_cgdist():
+    """Locate the cgdist binary: $CGDIST_BIN, local release build, or PATH."""
+    candidates = []
+    env_bin = os.environ.get('CGDIST_BIN')
+    if env_bin:
+        candidates.append(env_bin)
+    candidates.append(os.path.join(SCRIPT_DIR, '..', 'target', 'release', 'cgdist'))
+    on_path = shutil.which('cgdist')
+    if on_path:
+        candidates.append(on_path)
+    for cand in candidates:
+        if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return os.path.abspath(cand)
+    return None
+
+
+def generate_matrices(cgdist):
+    """(Re)generate the four distance matrices that the validation loads.
+
+    Running the binary here makes the suite a single command: it validates
+    whatever cgdist is installed, whether built locally (../target/release)
+    or installed via `cargo install cgdist` (on PATH).
+    """
+    schema = 'schema_crc32'
+    profiles = 'profiles/test_profiles_crc32.tsv'
+    os.makedirs('results', exist_ok=True)
+    runs = [
+        ('results/crc32_hamming.tsv', ['--mode', 'hamming']),
+        ('results/crc32_snps.tsv', ['--mode', 'snps', '--hamming-fallback']),
+        ('results/crc32_snps_indel_contiguous.tsv', ['--mode', 'snps-indel-contiguous']),
+        ('results/crc32_snps_indel_bases.tsv', ['--mode', 'snps-indel-bases']),
+    ]
+    for out, mode_args in runs:
+        cmd = [cgdist, '--schema', schema, '--profiles', profiles,
+               '--output', out, '--hasher-type', 'crc32'] + mode_args
+        print('  $ ' + ' '.join(cmd))
+        subprocess.run(cmd, check=True)
 
 def load_distance_matrix(filepath):
     """Load a distance matrix from TSV file."""
@@ -202,5 +246,23 @@ def validate_cgdist():
     return all_passed
 
 if __name__ == '__main__':
+    # Run from this script's directory so the relative paths below (schema_crc32,
+    # profiles/, results/) resolve regardless of the caller's working directory.
+    os.chdir(SCRIPT_DIR)
+
+    cgdist = find_cgdist()
+    if cgdist is None:
+        print("ERROR: could not find the 'cgdist' binary.")
+        print("  Fix it with ONE of:")
+        print("    - build locally:   (cd .. && cargo build --release)")
+        print("    - install it:      cargo install cgdist   (puts it on your PATH)")
+        print("    - point to it:     CGDIST_BIN=/path/to/cgdist python3 run_validation.py")
+        sys.exit(2)
+
+    print(f"Using cgdist binary: {cgdist}")
+    print("Generating distance matrices...")
+    generate_matrices(cgdist)
+    print()
+
     success = validate_cgdist()
     sys.exit(0 if success else 1)

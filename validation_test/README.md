@@ -67,6 +67,26 @@ The test uses 3 loci with carefully designed allelic variants:
 
 ## Running the Validation
 
+### Quickest path: one command
+
+`run_validation.py` is self-contained. It locates the `cgdist` binary
+(checking `$CGDIST_BIN`, then `../target/release/cgdist`, then your
+`PATH`), regenerates the four distance matrices, and validates them —
+so after installing or building cgDist you only need:
+
+```bash
+python3 run_validation.py
+```
+
+This works whether you installed via `cargo install cgdist` (binary on
+your `PATH`) or built locally with `cargo build --release` (binary in
+`../target/release/`). If the binary lives elsewhere, point to it with
+`CGDIST_BIN=/path/to/cgdist python3 run_validation.py`. Expected final
+line: `🎉 ALL VALIDATION TESTS PASSED!`.
+
+The manual, step-by-step instructions below are equivalent and useful
+if you want to inspect each intermediate matrix.
+
 There are two ways to run the validation suite from a fresh clone:
 
 - **Quick smoke test (recommended for first-time users)**: the input fixture
@@ -94,6 +114,11 @@ python3 setup_validation_test.py
 ```
 
 ### Step 3: Run cgDist Tests
+
+> If you installed via `cargo install cgdist`, the binary is on your
+> `PATH`: replace `../target/release/cgdist` with `cgdist` in the
+> commands below.
+
 ```bash
 # Test all distance modes
 ../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_hamming.tsv --mode hamming --hasher-type crc32
