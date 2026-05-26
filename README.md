@@ -316,14 +316,6 @@ CACHE ENRICHMENT OPTIONS:
     --enrich-lengths           Enrich cache with nucleotide sequence lengths from schema
     --enrich-output <FILE>     Output file for enriched cache [default: overwrites input cache]
 
-RECOMBINATION-CANDIDATE FLAGGING OPTIONS:
-    --candidate-recombination-log <FILE>        Output flagging log (one row per flagged
-                                                candidate locus)
-    --candidate-recombination-threshold <N>     SNPs + InDel-bases threshold above which a
-                                                locus is flagged as a recombination candidate
-                                                [default: 20]
-    (legacy aliases --recombination-log / --recombination-threshold are still accepted)
-
 OTHER OPTIONS:
     --missing-char <CHAR>      Missing data character [default: -]
     --no-hamming-fallback      Disable Hamming fallback for SNPs mode
