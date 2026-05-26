@@ -91,13 +91,13 @@ cargo install cgdist
 
 This fetches the latest published release from
 [crates.io](https://crates.io/crates/cgdist), builds it locally with
-your stable Rust toolchain, and installs the `cgdist`, `inspector`,
-and `recombination_candidate_analyzer` binaries to `~/.cargo/bin/`
+your stable Rust toolchain, and installs the `cgdist` and
+`recombination_candidate_analyzer` binaries to `~/.cargo/bin/`
 (which should already be on your `PATH` after a default rustup
-install). The deprecated `recombination_analyzer` binary is also
-installed and forwards every argument to
-`recombination_candidate_analyzer` with a deprecation notice — existing
-scripts continue to work.
+install). Cache inspection is available via `cgdist --inspector`. The
+deprecated `recombination_analyzer` binary is also installed and forwards
+every argument to `recombination_candidate_analyzer` with a deprecation
+notice — existing scripts continue to work.
 
 To pin a specific published version:
 
@@ -374,125 +374,70 @@ cgDist includes a companion screen that flags **candidate** recombinant loci bas
 - **EFSA Loci Support**: Compatible with standardized loci sets for food safety applications
 - **Distance Matrix Correction**: Recomputes distances excluding flagged loci
 
-### Tool 1: Built-in Flagging
+### How to flag candidates
 
-The main `cgdist` binary can flag candidate recombinant loci during distance calculation:
-
-```bash
-# Flag candidate loci with default threshold (20 SNPs+InDel bases)
-cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
-    --candidate-recombination-log recombination_events.csv \
-    --mode snps-indel-bases
-
-# Custom threshold (e.g., 30 SNPs+InDel bases)
-cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
-    --candidate-recombination-log recombination_events.csv \
-    --candidate-recombination-threshold 30 \
-    --mode snps-indel-bases
-```
-
-> **Note** — `--recombination-log` and `--recombination-threshold` are kept as deprecated aliases of the canonical `--candidate-recombination-*` flags (a deprecation warning is printed when used). Existing scripts continue to work.
-
-**Output**: CSV log with locus, sample pairs, divergence percentages, and sequence lengths
-
-### Tool 2: Recombination-Candidate Analyzer (Post-processing)
-
-For advanced flagging with Hamming filtering and EFSA loci support:
+Recombination-candidate flagging is performed by the
+`recombination_candidate_analyzer` binary, which reads an **enriched cache**
+(a cgDist cache that also stores per-allele sequence lengths) and flags loci
+whose per-locus nucleotide-difference density exceeds a threshold. This is the
+workflow described in the paper (Supplementary §S6).
 
 ```bash
-# Build the candidate analyzer
-cargo build --release --bin recombination_candidate_analyzer
-
-# Step 1: Create enriched cache with sequence lengths
+# Step 1: build an enriched cache alongside the distance matrix.
+# On a freshly created cache, --enrich-lengths records the sequence lengths
+# in place, so a single cgdist run is enough.
 cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
-    --cache-file cache.bin --enrich-lengths --mode snps-indel-bases
+    --mode snps-indel-bases --cache-file cache.bin --enrich-lengths
 
-# Step 2: Run the analyzer
-./target/release/recombination_candidate_analyzer \
+# Step 2: flag candidate loci and write a corrected distance matrix.
+recombination_candidate_analyzer \
     --enriched-cache cache.bin \
     --profiles profiles.tsv \
     --distance-matrix distances.tsv \
     --output-matrix corrected_distances.tsv \
-    --candidate-recombination-log recombination_events.tsv \
-    --threshold 3.0
-
-# Custom threshold (5% mutation density)
-./target/release/recombination_candidate_analyzer \
-    --enriched-cache cache.bin \
-    --profiles profiles.tsv \
-    --distance-matrix distances.tsv \
-    --output-matrix corrected_distances.tsv \
-    --candidate-recombination-log recombination_events.tsv \
-    --threshold 5.0
+    --candidate-recombination-log candidate_recombination_loci.tsv \
+    --threshold 3.0          # mutation-density % (default: 3.0; e.g. 5.0 for a stricter screen)
 ```
 
 > **Note** — the binary `recombination_analyzer` and the flag `--recombination-log` are kept as deprecated aliases for backward compatibility (a deprecation notice is printed when invoked). Existing scripts continue to work.
 
-### Input Requirements
+### Inputs
 
 cgDist consumes standard cgMLST outputs. Profiles and schemas can be
 generated, for example, with [ChewBBACA](https://github.com/B-UMMI/chewBBACA)
 (Silva et al. 2018) or downloaded from [Chewie-NS](https://chewbbaca.online/)
 (Mamede et al. 2020).
 
-**For Tool 1 (Built-in Flagging)**:
-1. **Schema**: FASTA directory with allele sequences (e.g. ChewBBACA schema directory)
-2. **Profiles**: TSV/CSV file with sample-locus-allele matrix (e.g. ChewBBACA `results_alleles.tsv`)
+1. **Enriched cache** (`.bin`): a cgDist cache built with `--cache-file` + `--enrich-lengths`
+2. **Allelic profiles** (TSV/CSV): sample-locus-allele matrix
+3. **Distance matrix** (TSV): the original distance matrix from cgdist
+4. **EFSA loci** (optional): TSV file listing loci of interest
 
-**For Tool 2 (Recombination-Candidate Analyzer)**:
-1. **Enriched Cache**: `.bin` file generated with `--enrich-lengths` option
-2. **Allelic Profiles**: TSV file with sample-locus-allele matrix
-3. **Distance Matrix**: Original distance matrix from cgdist
-4. **EFSA Loci** (optional): TSV file listing loci of interest
+### Outputs
 
-### Output Files
-
-**Tool 1 Output**: `recombination_events.csv`
-- Locus name
-- Sample pairs
-- Divergence percentage
-- Sequence lengths
-- SNPs and InDel counts
-
-**Tool 2 Outputs**:
-1. **Corrected Distance Matrix**: Distance matrix with flagged candidate loci excluded
-2. **Flagging Log**: Detailed list of flagged candidate loci with:
-   - Sample pairs
-   - Locus information
-   - Mutation statistics (SNPs, InDels)
-   - Density percentages
-   - Sequence lengths
+1. **Corrected distance matrix** (`--output-matrix`): distances recomputed with the flagged candidate loci excluded
+2. **Candidate flagging log** (`--candidate-recombination-log`, TSV): one row per flagged sample-pair/locus, with SNP/InDel counts, Hamming distance, average allele length, mutation-density %, and recombination-excess %
 
 ### Parameters
 
-**Tool 1 (Built-in)**:
-- `--candidate-recombination-threshold`: SNPs + InDel bases threshold (default: 20). Legacy alias `--recombination-threshold` is also accepted.
+- `--threshold`: mutation-density percentage above which a locus is flagged (default: 3.0)
 - `--candidate-recombination-log`: output flagging log path. Legacy alias `--recombination-log` is also accepted.
-
-**Tool 2 (Recombination-Candidate Analyzer)**:
-- `--threshold`: Mutation density percentage (default: 3.0%)
-- `--candidate-recombination-log`: output flagging log path. Legacy alias `--recombination-log` is also accepted.
+- `--output-matrix`: corrected distance-matrix output path
 
 ### Complete Workflow Example
 
 ```bash
-# Option A: Quick flagging during distance calculation
+# Step 1: build an enriched cache + distance matrix
 cgdist --schema schema/ --profiles samples.tsv --output distances.tsv \
-    --candidate-recombination-log events.csv --candidate-recombination-threshold 20 \
-    --mode snps-indel-bases
+    --mode snps-indel-bases --cache-file cache.bin --enrich-lengths
 
-# Option B: Advanced flagging with corrected distances
-# Step 1: Create enriched cache
-cgdist --schema schema/ --profiles samples.tsv --output distances.tsv \
-    --cache-file cache.bin --enrich-lengths --mode snps-indel-bases
-
-# Step 2: Flag and correct
-./target/release/recombination_candidate_analyzer \
+# Step 2: flag candidate loci and write a corrected distance matrix
+recombination_candidate_analyzer \
     --enriched-cache cache.bin \
     --profiles samples.tsv \
     --distance-matrix distances.tsv \
     --output-matrix corrected_distances.tsv \
-    --candidate-recombination-log events.tsv \
+    --candidate-recombination-log candidate_recombination_loci.tsv \
     --threshold 3.0
 ```
 
@@ -519,57 +464,24 @@ cgdist --schema schema/ --profiles samples.tsv --output distances.tsv \
 
 ## 🔍 Cache Inspector
 
-The `inspector` tool provides detailed analysis of cgDist cache files, including validation, statistics, and compatibility checks.
-
-### Building the Inspector
-
-```bash
-cargo build --release --bin inspector
-```
-
-### Basic Usage
+Inspect a cgDist cache — version, hasher type, distance mode, alignment
+parameters, per-locus entry counts, and any saved note — with the built-in
+inspector flag:
 
 ```bash
-# Show cache summary
-./target/release/inspector --cache cache.lz4
-
-# Detailed information including all loci
-./target/release/inspector --cache cache.lz4 --detailed
-
-# Show entries for specific locus
-./target/release/inspector --cache cache.lz4 --show-locus locus_name
-
-# Validate cache integrity
-./target/release/inspector --cache cache.lz4 --validate
-
-# Export cache summary to TSV
-./target/release/inspector --cache cache.lz4 --export-summary summary.tsv
-
-# Check top N loci by entry count
-./target/release/inspector --cache cache.lz4 --top-loci 20
+cgdist --inspector cache.lz4
 ```
 
-### Advanced Features
+This reads the cache format written by `--cache-file` (LZ4-compressed JSON),
+including length-enriched caches built with `--enrich-lengths` (the file
+extension, e.g. `.lz4` or `.bin`, does not matter — the format is the same).
 
-```bash
-# Detect alignment mode from parameters
-./target/release/inspector --cache cache.lz4 --detect-mode
+Use it to:
 
-# Check compatibility with specific alignment parameters
-./target/release/inspector --cache cache.lz4 \
-    --check-compatibility "5,-4,-10,-1"  # match,mismatch,gap_open,gap_extend
-
-# Quiet mode for scripting
-./target/release/inspector --cache cache.lz4 --validate --quiet
-```
-
-### Use Cases
-
-1. **Cache Validation**: Verify cache file integrity before reuse
-2. **Troubleshooting**: Diagnose cache compatibility issues
-3. **Statistics**: Understand cache size and loci distribution
-4. **Auditing**: Track which alignment parameters were used
-5. **Quality Control**: Ensure cache matches expected schema
+1. **Validate** a cache file's integrity before reuse
+2. **Audit** which alignment parameters and distance mode a cache was built with
+3. **Inspect** cache size and per-locus entry distribution
+4. **Troubleshoot** cache compatibility issues
 
 ## 🔌 Custom Hashers Plugin System
 

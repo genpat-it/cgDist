@@ -610,17 +610,20 @@ impl DistanceEngine {
                 }
 
                 // Only include pairs with successful alignment results
-                alignment_result.map(|(snps, indel_events, indel_bases)| {
-                    (locus, *crc1, *crc2, snps, indel_events, indel_bases)
+                alignment_result.map(|(snps, indel_events, indel_bases, detail)| {
+                    (locus, *crc1, *crc2, snps, indel_events, indel_bases, detail)
                 })
             })
             .collect();
 
         pb.finish_with_message("✅ Missing alignments computed!");
 
-        // Store results in cache
-        for (locus, crc1, crc2, snps, indel_events, indel_bases) in results {
+        // Store results in cache (and collect alignment detail rows for --save-alignments)
+        for (locus, crc1, crc2, snps, indel_events, indel_bases, detail) in results {
             self.cache_distance(locus, crc1, crc2, snps, indel_events, indel_bases);
+            if let Some(row) = detail {
+                self.alignment_details.push(row);
+            }
         }
 
         let compute_elapsed = start_compute.elapsed();
@@ -647,14 +650,14 @@ impl DistanceEngine {
         crc1: u32,
         crc2: u32,
         mode: DistanceMode,
-    ) -> Option<(usize, usize, usize)> {
+    ) -> Option<(usize, usize, usize, Option<String>)> {
         if crc1 == crc2 {
-            return Some((0, 0, 0)); // Identical alleles
+            return Some((0, 0, 0, None)); // Identical alleles
         }
 
         // For Hamming mode, different CRCs = distance 1 (no sequence analysis needed)
         if matches!(mode, DistanceMode::Hamming) {
-            return Some((1, 0, 0)); // Different CRC = 1 Hamming distance unit
+            return Some((1, 0, 0, None)); // Different CRC = 1 Hamming distance unit
         }
 
         // Try to get sequences and align (for non-Hamming modes)
@@ -691,18 +694,30 @@ impl DistanceEngine {
                                 let (snps, indel_events, indel_bases) =
                                     compute_alignment_stats(&traceback.query, &traceback.reference);
 
-                                // TODO: Save alignment details if requested
-                                // self.add_alignment_detail(locus, crc1, crc2, &seq1.sequence, &seq2.sequence,
-                                //                          &traceback.query, &traceback.reference,
-                                //                          snps, indel_events, indel_bases, result.get_score() as f32);
+                                // Build the detailed alignment row only when
+                                // --save-alignments is active. Reading self here is
+                                // fine in the parallel context; the row is returned and
+                                // collected by the caller (which holds &mut self).
+                                let detail = if self.save_alignments_path.is_some() {
+                                    Some(format!(
+                                        "{locus}\t{crc1}\t{crc2}\t{}\t{}\t{}\t{}\t{snps}\t{indel_events}\t{indel_bases}\t{:.2}",
+                                        String::from_utf8_lossy(&seq1.sequence),
+                                        String::from_utf8_lossy(&seq2.sequence),
+                                        traceback.query,
+                                        traceback.reference,
+                                        result.get_score() as f32,
+                                    ))
+                                } else {
+                                    None
+                                };
 
-                                return Some((snps, indel_events, indel_bases));
+                                return Some((snps, indel_events, indel_bases, detail));
                             }
                             Err(_) => {
                                 // Traceback failed, use simple approach
                                 let (snps, indel_events, indel_bases) =
                                     self.analyze_sequences(&seq1.sequence, &seq2.sequence);
-                                return Some((snps, indel_events, indel_bases));
+                                return Some((snps, indel_events, indel_bases, None));
                             }
                         }
                     }
@@ -710,7 +725,7 @@ impl DistanceEngine {
                         // Alignment failed, use simple comparison
                         let (snps, indel_events, indel_bases) =
                             self.analyze_sequences(&seq1.sequence, &seq2.sequence);
-                        return Some((snps, indel_events, indel_bases));
+                        return Some((snps, indel_events, indel_bases, None));
                     }
                 }
             }
@@ -1042,9 +1057,6 @@ impl DistanceEngine {
         }
         Ok(())
     }
-
-    // TODO: Implement add_alignment_detail for --save-alignments functionality
-    // Currently disabled due to threading complexity with Rayon
 }
 
 /// Calculate distance between two samples

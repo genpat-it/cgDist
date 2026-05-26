@@ -36,17 +36,29 @@ impl DistanceMatrix {
         let file =
             File::open(path).map_err(|e| format!("Failed to open matrix file '{path}': {e}"))?;
         let reader = BufReader::new(file);
-        let mut lines = reader.lines();
+
+        // cgDist writes '#'-prefixed comment lines (command, timestamp,
+        // version) at the top of every matrix; skip those and any blank
+        // lines before parsing the header and data rows.
+        let mut data_lines = Vec::new();
+        for line in reader.lines() {
+            let line = line.map_err(|e| format!("Failed to read matrix file: {e}"))?;
+            let trimmed = line.trim_start();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            data_lines.push(line);
+        }
+        let mut data_iter = data_lines.into_iter();
 
         // Read header
-        let header_line = lines
+        let header_line = data_iter
             .next()
-            .ok_or("Empty matrix file")?
-            .map_err(|e| format!("Failed to read header: {e}"))?;
+            .ok_or("Empty matrix file (no header row after comments)")?;
 
         let samples: Vec<String> = header_line
             .split('\t')
-            .skip(1) // Skip first empty cell
+            .skip(1) // Skip first empty/label cell
             .map(|s| s.trim().to_string())
             .collect();
 
@@ -54,14 +66,13 @@ impl DistanceMatrix {
         let mut matrix = vec![vec![0.0; n]; n];
 
         // Read matrix rows
-        for (i, line) in lines.enumerate() {
-            let line = line.map_err(|e| format!("Failed to read line {}: {}", i + 2, e))?;
+        for (i, line) in data_iter.enumerate() {
             let values: Vec<&str> = line.split('\t').collect();
 
             if values.len() != n + 1 {
                 return Err(format!(
-                    "Row {} has {} columns, expected {}",
-                    i + 2,
+                    "Data row {} has {} columns, expected {}",
+                    i + 1,
                     values.len(),
                     n + 1
                 ));
@@ -70,8 +81,8 @@ impl DistanceMatrix {
             for (j, value_str) in values.iter().skip(1).enumerate() {
                 matrix[i][j] = value_str.trim().parse::<f64>().map_err(|e| {
                     format!(
-                        "Failed to parse value at row {}, col {}: {}",
-                        i + 2,
+                        "Failed to parse value at data row {}, col {}: {}",
+                        i + 1,
                         j + 1,
                         e
                     )

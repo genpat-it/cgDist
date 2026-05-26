@@ -53,10 +53,12 @@ The test uses 3 loci with carefully designed allelic variants:
 ## Files in this Directory
 
 ### Core Test Files
+- `requirements.txt`: Python dependencies for the validation scripts (`pip install -r requirements.txt`)
 - `setup_validation_test.py`: Generates CRC32-based schema and profiles
-- `run_validation.py`: Main validation script with correct expected values
-- `validate_cache.py`: Validates cache integrity and consistency
-- `test_new_features.py`: Tests cache-only mode and recombination detection
+- `run_validation.py`: Main validation script with correct expected values (self-contained)
+- `validate_cache.py`: Validates cache integrity and consistency (self-contained)
+- `test_cache_only_and_recombination.py`: Tests cache-only mode and the recombination-candidate analyzer workflow
+- `test_cli_arguments.py`: Comprehensive smoke-test exercising every cgdist argument/combination plus the analyzer
 - `schema_crc32/`: FASTA files with controlled sequences
 - `profiles/test_profiles_crc32.tsv`: Sample-to-allele mappings
 - `results/`: Output distance matrices from cgDist
@@ -75,6 +77,7 @@ The test uses 3 loci with carefully designed allelic variants:
 so after installing or building cgDist you only need:
 
 ```bash
+pip install -r requirements.txt   # one-time: installs pandas
 python3 run_validation.py
 ```
 
@@ -147,10 +150,16 @@ python3 run_validation.py
 python3 validate_cache.py
 ```
 
-### Step 6: Test New Features (Cache-Only & Recombination Detection)
+### Step 6: Test cache-only mode & recombination-candidate flagging
 ```bash
-# Test cache-only mode and recombination detection
-python3 test_new_features.py
+# Test cache-only mode and the enrich -> recombination_candidate_analyzer workflow
+python3 test_cache_only_and_recombination.py
+```
+
+### Step 7: Comprehensive CLI argument smoke-test (optional)
+```bash
+# Exercise every cgdist argument/combination plus the analyzer
+python3 test_cli_arguments.py
 ```
 
 Expected output:

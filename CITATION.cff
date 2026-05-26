@@ -6,8 +6,8 @@ authors:
     affiliation: "Gran Sasso Science Institute"
     orcid: "https://orcid.org/0000-0001-6836-3455"
 title: "cgDist"
-version: "0.1.1"
-date-released: 2026-05-05
+version: "0.1.2"
+date-released: 2026-05-26
 license: MIT
 type: software
 abstract: "Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis"

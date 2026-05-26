@@ -144,29 +144,6 @@ pub struct Args {
     #[argh(switch)]
     pub cache_only: bool,
 
-    /// flag candidate recombination regions: output log of allele pairs whose mutation density
-    /// exceeds --candidate-recombination-threshold. This is a heuristic flagging step, not a
-    /// validated recombination detection method (confirmation requires phylogeny-aware tools
-    /// such as Gubbins, ClonalFrameML, fastGEAR). Legacy alias --recombination-log is also
-    /// accepted.
-    #[argh(option)]
-    pub candidate_recombination_log: Option<String>,
-
-    /// [DEPRECATED ALIAS] use --candidate-recombination-log instead. Kept for backward
-    /// compatibility; a deprecation warning is printed when this name is used.
-    #[argh(option)]
-    pub recombination_log: Option<String>,
-
-    /// SNPs + InDel-bases threshold above which a locus is flagged as a recombination candidate
-    /// (default: 20). Legacy alias --recombination-threshold is also accepted.
-    #[argh(option)]
-    pub candidate_recombination_threshold: Option<usize>,
-
-    /// [DEPRECATED ALIAS] use --candidate-recombination-threshold instead. Kept for backward
-    /// compatibility; a deprecation warning is printed when this name is used.
-    #[argh(option)]
-    pub recombination_threshold: Option<usize>,
-
     /// show matrix statistics and diversity metrics only, then exit
     #[argh(switch)]
     pub stats_only: bool,

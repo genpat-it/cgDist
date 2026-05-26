@@ -103,9 +103,11 @@ opt-level = 3
 name = "cgdist"
 path = "src/main.rs"
 
-[[bin]]
-name = "inspector"
-path = "src/inspector.rs"
+# NOTE: the standalone `inspector` binary (src/inspector.rs) is currently
+# disabled — its loader only understands the legacy bincode cache format,
+# while cgdist now writes LZ4-compressed JSON. Use `cgdist --inspector <cache>`
+# instead (it reads the current format). The source is kept for a future
+# rewrite onto the current cache type.
 
 [[bin]]
 name = "recombination_candidate_analyzer"

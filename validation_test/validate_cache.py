@@ -14,11 +14,34 @@ import pandas as pd
 import sys
 import json
 import os
+import shutil
 from pathlib import Path
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def find_cgdist():
+    """Locate the cgdist binary: $CGDIST_BIN, local release build, or PATH."""
+    candidates = []
+    env_bin = os.environ.get('CGDIST_BIN')
+    if env_bin:
+        candidates.append(env_bin)
+    candidates.append(os.path.join(SCRIPT_DIR, '..', 'target', 'release', 'cgdist'))
+    on_path = shutil.which('cgdist')
+    if on_path:
+        candidates.append(on_path)
+    for cand in candidates:
+        if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return os.path.abspath(cand)
+    return None
+
+
+CGDIST = find_cgdist()
+
 
 def run_cgdist(args):
     """Run cgDist and return stdout, stderr, returncode."""
-    cmd = ['../target/release/cgdist'] + args
+    cmd = [CGDIST] + args
     result = subprocess.run(cmd, capture_output=True, text=True)
     return result.stdout, result.stderr, result.returncode
 
@@ -215,7 +238,34 @@ def main():
     print("=" * 80)
     print("Validating cache consistency, metadata, and performance...")
     print()
-    
+
+    os.chdir(SCRIPT_DIR)
+    if CGDIST is None:
+        print("ERROR: could not find the 'cgdist' binary "
+              "($CGDIST_BIN / ../target/release / PATH). Build it "
+              "(cd .. && cargo build --release) or run 'cargo install cgdist'.")
+        sys.exit(2)
+    print(f"Using cgdist binary: {CGDIST}")
+
+    # Generate the validation cache if missing, so the suite runs as a
+    # single command (the metadata checks expect this note and dataset).
+    cache_file = "results/validation_cache.lz4"
+    if not os.path.exists(cache_file):
+        print(f"Generating {cache_file} ...")
+        os.makedirs("results", exist_ok=True)
+        _, stderr, rc = run_cgdist([
+            '--schema', 'schema_crc32',
+            '--profiles', 'profiles/test_profiles_crc32.tsv',
+            '--output', 'results/cache_gen.tsv',
+            '--mode', 'snps-indel-bases', '--hasher-type', 'crc32',
+            '--cache-file', cache_file,
+            '--cache-note', 'Validation test cache',
+            '--force-recompute',
+        ])
+        if rc != 0:
+            print(f"❌ Failed to generate cache: {stderr}")
+            sys.exit(1)
+
     all_tests_passed = True
     
     # Test 1: Cache consistency across distance modes

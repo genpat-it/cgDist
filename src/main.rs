@@ -53,22 +53,6 @@ fn run_main() -> Result<(), String> {
             args.mode
         );
     }
-    if args.recombination_log.is_some() && args.candidate_recombination_log.is_none() {
-        eprintln!(
-            "⚠️  Note: --recombination-log is a deprecated alias for \
-             --candidate-recombination-log. The legacy name is still accepted; \
-             please update your scripts."
-        );
-        args.candidate_recombination_log = args.recombination_log.clone();
-    }
-    if args.recombination_threshold.is_some() && args.candidate_recombination_threshold.is_none() {
-        eprintln!(
-            "⚠️  Note: --recombination-threshold is a deprecated alias for \
-             --candidate-recombination-threshold. The legacy name is still accepted; \
-             please update your scripts."
-        );
-        args.candidate_recombination_threshold = args.recombination_threshold;
-    }
     if args.no_hamming_fallback {
         eprintln!(
             "⚠️  Note: --no-hamming-fallback is now a no-op. The Hamming fallback is opt-in \
@@ -95,6 +79,47 @@ fn run_main() -> Result<(), String> {
     // Load configuration file if specified
     if let Some(config_path) = args.config.clone() {
         args = args.with_config_file(&config_path)?;
+    }
+
+    // ---- Validate custom alignment scoring before it reaches parasail ----
+    // parasail requires match >= 0 and mismatch <= 0 (and non-negative gap
+    // penalties); passing the wrong sign otherwise aborts the process. Fail
+    // early with a friendly message instead.
+    if let Some(v) = args.match_score {
+        if v < 0 {
+            eprintln!(
+                "❌ ERROR: --match-score must be >= 0 (got {v}). The match score is a \
+                 reward, e.g. --match-score 2."
+            );
+            std::process::exit(1);
+        }
+    }
+    if let Some(v) = args.mismatch_penalty {
+        if v > 0 {
+            eprintln!(
+                "❌ ERROR: --mismatch-penalty must be <= 0 (got {v}). Pass the penalty as a \
+                 negative number, e.g. --mismatch-penalty -1."
+            );
+            std::process::exit(1);
+        }
+    }
+    if let Some(v) = args.gap_open {
+        if v < 0 {
+            eprintln!(
+                "❌ ERROR: --gap-open must be >= 0 (got {v}). Pass the gap-open penalty as a \
+                 non-negative number, e.g. --gap-open 5."
+            );
+            std::process::exit(1);
+        }
+    }
+    if let Some(v) = args.gap_extend {
+        if v < 0 {
+            eprintln!(
+                "❌ ERROR: --gap-extend must be >= 0 (got {v}). Pass the gap-extend penalty as a \
+                 non-negative number, e.g. --gap-extend 2."
+            );
+            std::process::exit(1);
+        }
     }
 
     // Handle inspector mode
@@ -430,15 +455,6 @@ fn run_main() -> Result<(), String> {
         return Ok(());
     }
 
-    // Set candidate-region recombination flagging if requested (TODO: implement)
-    if let Some(ref _log_path) = args.candidate_recombination_log {
-        // TODO: Implement candidate-region flagging
-        println!(
-            "🧬 Candidate-region flagging requested (threshold: {} bp) - not implemented yet",
-            args.candidate_recombination_threshold.unwrap_or(20)
-        );
-    }
-
     // Calculate distance matrix.
     // The internal `no_hamming_fallback` parameter is the inverse of the opt-in flag:
     // pass true when the user has NOT requested fallback (the default).
@@ -512,13 +528,6 @@ fn run_main() -> Result<(), String> {
     // Save alignment details if requested
     if let Err(e) = engine.save_alignments() {
         eprintln!("⚠️  Warning: Failed to save alignment details: {e}");
-    }
-
-    // Save candidate-region flagging log if specified (TODO: implement).
-    // candidate_recombination_log was already aliased from the deprecated --recombination-log
-    // earlier in run_main(), so checking the canonical field is sufficient here.
-    if let Some(ref _log_path) = args.candidate_recombination_log {
-        println!("⚠️  Candidate-region flagging log saving not implemented yet");
     }
 
     // Print summary

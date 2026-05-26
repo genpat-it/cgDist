@@ -11,3 +11,6 @@ CLAUDE.md
 !validation_test/profiles/test_profiles_crc32.tsv
 validation_test/results/*.csv
 validation_test/test_bidirectional_streaming.py
+validation_test/results/*.lz4
+validation_test/results/*.bin
+validation_test/cgdist_benchmark_*.json
