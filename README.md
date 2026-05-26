@@ -192,14 +192,13 @@ SNPs+InDel-events, SNPs+InDel-bases), checks the mathematical invariant
 `cgDist ≥ Hamming`, and confirms Parasail alignment integration.
 
 ```bash
-# After building cgDist (see Installation)
+# After installing or building cgDist (see Installation)
 cd validation_test
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_hamming.tsv --mode hamming --hasher-type crc32
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps.tsv --mode snps --hasher-type crc32 --hamming-fallback
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_contiguous.tsv --mode snps-indel-contiguous --hasher-type crc32
-../target/release/cgdist --schema schema_crc32 --profiles profiles/test_profiles_crc32.tsv --output results/crc32_snps_indel_bases.tsv --mode snps-indel-bases --hasher-type crc32
+pip install -r requirements.txt        # one-time: installs pandas
 
-# Verify expected results
+# run_validation.py is self-contained: it locates the cgdist binary
+# ($CGDIST_BIN, ../target/release, or PATH), regenerates the four distance
+# matrices, and validates them.
 python3 run_validation.py
 ```
 

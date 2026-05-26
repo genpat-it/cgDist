@@ -168,11 +168,12 @@ def main():
         for t in ["1", "2", "0"]:
             cg(d, f"threads={t}", ["--threads", t, "--mode", "snps", "--hasher-type", "crc32"])
 
-        # save-alignments
+        # save-alignments must produce real data rows, not just a header
         aln = os.path.join(d, "alignments.tsv")
         cg(d, "save-alignments", ["--mode", "snps-indel-bases", "--save-alignments", aln,
                                   "--hasher-type", "crc32", "--force-recompute"])
-        run_case("save-alignments output exists", ["test", "-s", aln])
+        run_case("save-alignments has data rows (not just header)",
+                 ["bash", "-c", f'test "$(wc -l < {aln})" -gt 1'])
 
         # stats-only / dry-run (no --output)
         run_case("stats-only", [CGDIST, "--schema", SCHEMA, "--profiles", PROFILES,
