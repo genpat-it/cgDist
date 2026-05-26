@@ -10,3 +10,4 @@ CLAUDE.md
 # reproducible from a fresh clone.
 !validation_test/profiles/test_profiles_crc32.tsv
 validation_test/results/*.csv
+validation_test/test_bidirectional_streaming.py
