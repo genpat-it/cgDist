@@ -75,6 +75,7 @@ jobs:
         python3 validate_cache.py
         python3 test_cache_only_and_recombination.py
         python3 test_cli_arguments.py
+        python3 test_filters_and_missing.py
 
   # Second job: Build and push Docker image (only if rust-checks passes)
   docker-build:

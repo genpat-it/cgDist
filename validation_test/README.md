@@ -59,6 +59,7 @@ The test uses 3 loci with carefully designed allelic variants:
 - `validate_cache.py`: Validates cache integrity and consistency (self-contained)
 - `test_cache_only_and_recombination.py`: Tests cache-only mode and the recombination-candidate analyzer workflow
 - `test_cli_arguments.py`: Comprehensive smoke-test exercising every cgdist argument/combination plus the analyzer
+- `test_filters_and_missing.py`: Functional tests for the data-handling args — `--min-loci`, `--missing-char`, `--sample-threshold`, `--locus-threshold`, `--include`/`--exclude` samples & loci, and output formats (verifies behaviour, not just that the flag runs)
 - `schema_crc32/`: FASTA files with controlled sequences
 - `profiles/test_profiles_crc32.tsv`: Sample-to-allele mappings
 - `results/`: Output distance matrices from cgDist
