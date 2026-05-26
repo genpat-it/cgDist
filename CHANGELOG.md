@@ -8,32 +8,26 @@ until the API stabilizes).
 
 ## [0.1.2] — 2026-05-26
 
+Maintenance release focused on installation, documentation, and
+reproducibility — making cgDist easier to install on current toolchains and
+its validation suite easier to reproduce from a fresh clone. The distance
+algorithms and their numerical results are unchanged from 0.1.1.
+
 ### Changed
 
-- **Corrected the declared MSRV** from `1.70` to `1.88` in `Cargo.toml`
-  and the README. The real minimum is imposed by the locked dependency
-  set (`home`, `clap`, `rmp`, `indexmap`, …), so the previous `1.70`
-  claim could not build; use the latest stable Rust (`rustup update
-  stable`).
-- **README**: recommend `cargo install cgdist --locked` for a
-  reproducible build that reuses the published `Cargo.lock` instead of
-  re-resolving to newer dependencies that may require an even more recent
-  toolchain.
+- Clarified the minimum supported Rust version and install guidance
+  (latest stable Rust; `cargo install cgdist --locked`).
+- Documented the recombination-candidate workflow through its supported
+  path — an enriched cache (`--enrich-lengths`) analysed by
+  `recombination_candidate_analyzer`; cache inspection via `cgdist --inspector`.
+- Hardened CLI input validation, error messages, and detailed-alignment
+  output (`--save-alignments`).
 
-### Fixed
+### Added
 
-- **`validation_test/run_validation.py` is now self-contained**: it
-  locates the `cgdist` binary (`$CGDIST_BIN`, `../target/release`, or
-  `PATH`), regenerates the four distance matrices, and validates them, so
-  the suite runs with a single `python3 run_validation.py` whether cgDist
-  was built locally or installed via `cargo install`.
-
-### Removed
-
-- Stopped tracking regenerated recombination CSV outputs and a local-only
-  streaming benchmark script (`test_bidirectional_streaming.py`) that
-  hardcoded absolute home-directory paths and depended on datasets not
-  shipped with the repository.
+- A self-contained, one-command validation suite
+  (`validation_test/requirements.txt`, automatic input generation, and a
+  CLI-argument smoke-test).
 
 ## [0.1.1] — 2026-05-05
 
