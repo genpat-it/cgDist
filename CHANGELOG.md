@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the
 relaxed pre-1.0 convention (breaking changes are allowed in 0.x patch releases
 until the API stabilizes).
 
+## [0.1.2] — 2026-05-26
+
+### Changed
+
+- **Corrected the declared MSRV** from `1.70` to `1.88` in `Cargo.toml`
+  and the README. The real minimum is imposed by the locked dependency
+  set (`home`, `clap`, `rmp`, `indexmap`, …), so the previous `1.70`
+  claim could not build; use the latest stable Rust (`rustup update
+  stable`).
+- **README**: recommend `cargo install cgdist --locked` for a
+  reproducible build that reuses the published `Cargo.lock` instead of
+  re-resolving to newer dependencies that may require an even more recent
+  toolchain.
+
+### Fixed
+
+- **`validation_test/run_validation.py` is now self-contained**: it
+  locates the `cgdist` binary (`$CGDIST_BIN`, `../target/release`, or
+  `PATH`), regenerates the four distance matrices, and validates them, so
+  the suite runs with a single `python3 run_validation.py` whether cgDist
+  was built locally or installed via `cargo install`.
+
+### Removed
+
+- Stopped tracking regenerated recombination CSV outputs and a local-only
+  streaming benchmark script (`test_bidirectional_streaming.py`) that
+  hardcoded absolute home-directory paths and depended on datasets not
+  shipped with the repository.
+
 ## [0.1.1] — 2026-05-05
 
 ### Added
