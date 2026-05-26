@@ -25,9 +25,10 @@ algorithms and their numerical results are unchanged from 0.1.1.
 
 ### Added
 
-- A self-contained, one-command validation suite
-  (`validation_test/requirements.txt`, automatic input generation, and a
-  CLI-argument smoke-test).
+- A self-contained validation suite that runs in CI on every push — covering
+  distance-mode correctness, cache consistency, the recombination-candidate
+  workflow, filtering / missing-data / output-format behaviour, and a
+  smoke-test over every CLI argument.
 
 ## [0.1.1] — 2026-05-05
 
