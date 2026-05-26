@@ -220,6 +220,43 @@ def main():
         nex_ok = (p.returncode == 0 and os.path.exists(nexp)
                   and "#NEXUS" in open(nexp).read().upper())
         check("--format nexus emits a #NEXUS block", nex_ok)
+
+        # ---- --hamming-fallback toggles SNPs-mode behaviour for InDel-only pairs ----
+        # Uses the committed validation dataset (Sample_Dels_Only / Sample_Ins_Only
+        # differ from Sample_Ref only by InDels; Sample_SNPs_Only by real SNPs).
+        def snps_matrix(out, extra):
+            cmd = [CGDIST, "--schema", SCHEMA, "--profiles",
+                   "profiles/test_profiles_crc32.tsv", "--output", out,
+                   "--mode", "snps", "--hasher-type", "crc32",
+                   "--force-recompute"] + extra
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            m = {}
+            if os.path.exists(out):
+                rows = [l.rstrip("\n") for l in open(out)
+                        if not l.startswith("#") and l.strip()]
+                hdr = rows[0].split("\t")[1:]
+                for row in rows[1:]:
+                    c = row.split("\t")
+                    for s2, v in zip(hdr, c[1:]):
+                        m[(c[0], s2)] = v
+            return p.returncode, m
+
+        rc_off, off = snps_matrix(os.path.join(d, "snps_off.tsv"), [])
+        rc_on, on = snps_matrix(os.path.join(d, "snps_on.tsv"), ["--hamming-fallback"])
+        ref = "Sample_Ref"
+        ok = (rc_off == 0 and rc_on == 0
+              # without fallback, InDel-only pairs contribute 0 SNPs
+              and off.get((ref, "Sample_Dels_Only")) == "0"
+              and off.get((ref, "Sample_Ins_Only")) == "0"
+              # with fallback, each differing locus contributes +1 (3 loci -> 3)
+              and on.get((ref, "Sample_Dels_Only")) == "3"
+              and on.get((ref, "Sample_Ins_Only")) == "3"
+              # pairs with real SNPs are unaffected by the flag
+              and off.get((ref, "Sample_SNPs_Only")) == "4"
+              and on.get((ref, "Sample_SNPs_Only")) == "4")
+        check("--hamming-fallback: InDel-only 0 (off) -> 3 (on); real SNPs stay 4", ok,
+              f"off={off.get((ref,'Sample_Dels_Only'))} on={on.get((ref,'Sample_Dels_Only'))} "
+              f"snps_off={off.get((ref,'Sample_SNPs_Only'))}")
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
