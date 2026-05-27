@@ -102,7 +102,7 @@ notice — existing scripts continue to work.
 To pin a specific published version:
 
 ```bash
-cargo install cgdist --version 0.1.1
+cargo install cgdist --version 0.1.2
 ```
 
 For a fully reproducible build that uses exactly the dependency
