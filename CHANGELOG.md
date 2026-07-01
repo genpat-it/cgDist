@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the
 relaxed pre-1.0 convention (breaking changes are allowed in 0.x patch releases
 until the API stabilizes).
 
+## [Unreleased]
+
+### Added
+
+- `--emit-pairs <file>`: long-format per-pair table with data-quality columns
+  (`sample_i, sample_j, distance, shared_loci, total_loci, missing_frac`),
+  surfacing how many shared loci each distance actually rests on.
+- `--report <file.html>`: a self-contained HTML analyst dashboard (no external
+  assets, works offline) with dataset summary, per-sample data quality, the
+  pairwise-distance distribution, a clusters-vs-threshold curve, and an
+  interactive single-linkage outbreak-clustering explorer.
+
+Both are opt-in and do not change the default distance-matrix output.
+
 ## [0.1.2] — 2026-05-26
 
 Maintenance release focused on installation, documentation, and

@@ -481,10 +481,11 @@ fn run_main() -> Result<(), String> {
         std::process::exit(1);
     }
 
-    // Optional: long-format per-pair quality table (--emit-pairs). Opt-in; the
-    // pairs are re-derived from the (cached) distances, so this is cheap.
-    if let Some(ref pairs_path) = args.emit_pairs {
-        println!("\n📋 Emitting per-pair quality table...");
+    // Optional per-pair outputs (--emit-pairs / --report). Both consume the same
+    // per-pair table, so compute it once. Pairs are re-derived from the (cached)
+    // distances, so this is cheap. Opt-in; zero effect on default behavior.
+    if args.emit_pairs.is_some() || args.report.is_some() {
+        println!("\n📋 Building per-pair table...");
         let pair_rows = calculate_pairs_table(
             &matrix.samples,
             &matrix.loci_names,
@@ -493,15 +494,34 @@ fn run_main() -> Result<(), String> {
             args.min_loci,
             !args.hamming_fallback,
         );
-        if let Err(e) = write_pairs_long(
-            pairs_path,
-            &matrix.samples,
-            &pair_rows,
-            matrix.loci_names.len(),
-            &command_line,
-        ) {
-            eprintln!("❌ ERROR writing per-pair table: {e}");
-            std::process::exit(1);
+
+        if let Some(ref pairs_path) = args.emit_pairs {
+            if let Err(e) = write_pairs_long(
+                pairs_path,
+                &matrix.samples,
+                &pair_rows,
+                matrix.loci_names.len(),
+                &command_line,
+            ) {
+                eprintln!("❌ ERROR writing per-pair table: {e}");
+                std::process::exit(1);
+            }
+        }
+
+        if let Some(ref report_path) = args.report {
+            println!("📊 Rendering analyst dashboard...");
+            if let Err(e) = write_html_report(
+                report_path,
+                &matrix.samples,
+                &matrix.loci_names,
+                &pair_rows,
+                &args.mode,
+                &args.hasher_type,
+                &command_line,
+            ) {
+                eprintln!("❌ ERROR writing report: {e}");
+                std::process::exit(1);
+            }
         }
     }
 

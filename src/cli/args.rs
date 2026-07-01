@@ -35,6 +35,11 @@ pub struct Args {
     #[argh(option)]
     pub emit_pairs: Option<String>,
 
+    /// also write a self-contained HTML analyst dashboard (summary, per-sample
+    /// quality, distance distribution, interactive outbreak-clustering explorer) to this file
+    #[argh(option)]
+    pub report: Option<String>,
+
     /// missing data character (default: -)
     #[argh(option, default = "String::from(\"-\")")]
     pub missing_char: String,

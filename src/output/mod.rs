@@ -1,5 +1,8 @@
 // mod.rs - Output formatters module
 
+pub mod report;
+pub use report::write_html_report;
+
 use crate::data::AllelicProfile;
 use chrono;
 use std::fs::{create_dir_all, File};
