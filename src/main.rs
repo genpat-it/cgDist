@@ -529,6 +529,7 @@ fn run_main() -> Result<(), String> {
                 &pair_rows,
                 recomb.as_deref(),
                 args.recomb_threshold / 100.0,
+                args.ci_level,
                 &args.mode,
                 &args.hasher_type,
                 &command_line,

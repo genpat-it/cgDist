@@ -64,6 +64,7 @@ pub fn write_html_report(
     pair_rows: &[PairRow],
     recomb: Option<&[u32]>,
     recomb_threshold: f64,
+    ci_level: f64,
     mode: &str,
     hasher: &str,
     command_line: &str,
@@ -92,7 +93,9 @@ pub fn write_html_report(
     let mut shared_cnt = vec![0usize; n];
     let mut dists: Vec<usize> = Vec::with_capacity(pair_rows.len());
     let mut na_pairs = 0usize;
-    let mut edges: Vec<(usize, usize, usize)> = Vec::new();
+    // edges carry (i, j, d, shared, h, q2) so the CI can be computed for embedded edges
+    let mut edges: Vec<(usize, usize, usize, usize, usize, u64)> = Vec::new();
+    let mut unreliable_pairs = 0usize; // cheap low-information flag over all pairs
     for row in pair_rows {
         let (i, j, shared) = (row.i, row.j, row.shared);
         shared_sum[i] += shared;
@@ -102,7 +105,11 @@ pub fn write_html_report(
         match row.distance {
             Some(d) => {
                 dists.push(d);
-                edges.push((i, j, d));
+                edges.push((i, j, d, shared, row.h, row.q2));
+                let missing_frac = 1.0 - shared as f64 / n_loci.max(1) as f64;
+                if row.h < 10 && missing_frac > 0.15 {
+                    unreliable_pairs += 1;
+                }
                 if d < nn_dist[i] {
                     nn_dist[i] = d;
                     nn_idx[i] = j;
@@ -176,10 +183,15 @@ pub fn write_html_report(
     while embed_cap > 0 && count_le(embed_cap) > EMBED_BUDGET {
         embed_cap = embed_cap.saturating_sub(1);
     }
+    // Each embedded edge carries [i, j, d, ci_low, ci_high] so the explorer can
+    // flag links whose confidence interval straddles the chosen threshold.
     let embed_edges: Vec<Value> = edges
         .iter()
         .filter(|e| e.2 <= embed_cap)
-        .map(|&(i, j, d)| json!([i, j, d]))
+        .map(|&(i, j, d, shared, h, q2)| {
+            let (_dn, lo, hi, _rel) = crate::output::ci::pair_ci(d, h, q2, shared, n_loci, ci_level);
+            json!([i, j, d, (lo.round() as i64), (hi.round() as i64)])
+        })
         .collect();
     let truncated = embed_cap < t_ceiling;
 
@@ -282,6 +294,11 @@ pub fn write_html_report(
         "hist": { "bin_edges": bin_edges, "counts": counts },
         "cluster_curve": curve,
         "recombination": recomb_json,
+        "ci": {
+            "level": ci_level,
+            "unreliable_pairs": unreliable_pairs,
+            "unreliable_frac": ((unreliable_pairs as f64 / dists.len().max(1) as f64) * 1e4).round() / 1e4,
+        },
         "samples": sample_json,
         "edges": embed_edges,
         "embed_cap": embed_cap,

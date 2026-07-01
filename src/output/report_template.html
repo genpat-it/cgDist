@@ -175,10 +175,14 @@ function renderExplorer(t){
   const singl=groups.length-clusters.length;
   const largest=groups.reduce((m,g)=>Math.max(m,g.length),0);
   const linked=N-singl;
-  $('#estat').innerHTML=[
-    ['Clusters (≥2)',clusters.length],['Largest cluster',largest],
-    ['Linked isolates',linked],['Singletons',singl],
-  ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  // uncertain links: edges whose confidence interval straddles the threshold
+  // (ci_low <= t <= ci_high) — the link decision could flip within the CI.
+  let uncertain=0, hasCI=EDGES.length && EDGES[0].length>=5;
+  if(hasCI)for(const e of EDGES){ if(e[3]<=t && t<=e[4]) uncertain++; }
+  const stats=[['Clusters (≥2)',clusters.length],['Largest cluster',largest],
+    ['Linked isolates',linked],['Singletons',singl]];
+  if(hasCI)stats.push(['Uncertain links <span style="font-weight:400;font-size:10px">(CI spans threshold)</span>',uncertain]);
+  $('#estat').innerHTML=stats.map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   const S=DATA.samples;
   $('#clist').innerHTML = clusters.length ? clusters.map((g,i)=>
     `<div class="clus"><b>Cluster ${i+1}</b> · ${g.length} isolates <span class="mem">${g.slice(0,40).map(x=>esc(S[x].id)).join(', ')}${g.length>40?' …':''}</span></div>`
@@ -234,6 +238,10 @@ function renderRecomb(){
 }
 
 // ---- init ----
+if(DATA.ci && EDGES.length && EDGES[0].length>=5){
+  $('#expnote').innerHTML += ` Links carry a ${Math.round(DATA.ci.level*100)}% missingness CI; "uncertain links" have a CI spanning the threshold. `
+    +(DATA.ci.unreliable_frac>0?`<b>${pct(DATA.ci.unreliable_frac)}</b> of pairs are low-information (CI unreliable).`:'');
+}
 const t0=Math.min(7,DATA.embed_cap);
 $('#thr').value=t0;
 renderExplorer(t0);
