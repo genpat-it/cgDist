@@ -496,11 +496,13 @@ fn run_main() -> Result<(), String> {
         );
 
         if let Some(ref pairs_path) = args.emit_pairs {
+            let ci_level = if args.report_ci { Some(args.ci_level) } else { None };
             if let Err(e) = write_pairs_long(
                 pairs_path,
                 &matrix.samples,
                 &pair_rows,
                 matrix.loci_names.len(),
+                ci_level,
                 &command_line,
             ) {
                 eprintln!("❌ ERROR writing per-pair table: {e}");

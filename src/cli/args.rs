@@ -35,6 +35,15 @@ pub struct Args {
     #[argh(option)]
     pub emit_pairs: Option<String>,
 
+    /// with --emit-pairs, add a missingness confidence interval per pair
+    /// (dist_norm, ci_low, ci_high, ci_reliable) accounting for unobserved loci
+    #[argh(switch)]
+    pub report_ci: bool,
+
+    /// confidence level for --report-ci (default: 0.95)
+    #[argh(option, default = "0.95")]
+    pub ci_level: f64,
+
     /// also write a self-contained HTML analyst dashboard (summary, per-sample
     /// quality, distance distribution, interactive outbreak-clustering explorer) to this file
     #[argh(option)]

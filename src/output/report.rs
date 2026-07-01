@@ -93,12 +93,13 @@ pub fn write_html_report(
     let mut dists: Vec<usize> = Vec::with_capacity(pair_rows.len());
     let mut na_pairs = 0usize;
     let mut edges: Vec<(usize, usize, usize)> = Vec::new();
-    for &(i, j, dist, shared) in pair_rows {
+    for row in pair_rows {
+        let (i, j, shared) = (row.i, row.j, row.shared);
         shared_sum[i] += shared;
         shared_sum[j] += shared;
         shared_cnt[i] += 1;
         shared_cnt[j] += 1;
-        match dist {
+        match row.distance {
             Some(d) => {
                 dists.push(d);
                 edges.push((i, j, d));
@@ -191,7 +192,8 @@ pub fn write_html_report(
         let mut top: Vec<(usize, usize, u32)> = Vec::new();
         let mut pairs_with_recomb = 0usize;
         let mut max_rc = 0u32;
-        for (&(i, j, _, _), &r) in pair_rows.iter().zip(rc.iter()) {
+        for (row, &r) in pair_rows.iter().zip(rc.iter()) {
+            let (i, j) = (row.i, row.j);
             sum[i] += r as u64;
             sum[j] += r as u64;
             per_pair.push(r as usize);

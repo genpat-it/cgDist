@@ -1,8 +1,10 @@
 // mod.rs - Output formatters module
 
+pub mod ci;
 pub mod report;
 pub use report::write_html_report;
 
+use crate::core::PairRow;
 use crate::data::AllelicProfile;
 use chrono;
 use std::fs::{create_dir_all, File};
@@ -229,8 +231,9 @@ pub fn write_nexus(
 pub fn write_pairs_long(
     file_path: &str,
     samples: &[AllelicProfile],
-    rows: &[(usize, usize, Option<usize>, usize)],
+    rows: &[PairRow],
     total_loci: usize,
+    ci_level: Option<f64>,
     command_line: &str,
 ) -> Result<(), String> {
     ensure_parent_dir(file_path)?;
@@ -247,25 +250,39 @@ pub fn write_pairs_long(
     .map_err(|e| format!("Write error: {e}"))?;
     writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION"))
         .map_err(|e| format!("Write error: {e}"))?;
-    writeln!(
-        writer,
-        "sample_i\tsample_j\tdistance\tshared_loci\ttotal_loci\tmissing_frac"
-    )
-    .map_err(|e| format!("Write error: {e}"))?;
+    let mut header =
+        String::from("sample_i\tsample_j\tdistance\tshared_loci\ttotal_loci\tmissing_frac");
+    if ci_level.is_some() {
+        header.push_str("\tdist_norm\tci_low\tci_high\tci_reliable");
+    }
+    writeln!(writer, "{header}").map_err(|e| format!("Write error: {e}"))?;
 
     let denom = total_loci.max(1) as f64;
-    for &(i, j, distance, shared) in rows {
-        let dist_str = match distance {
+    for row in rows {
+        let dist_str = match row.distance {
             Some(d) => d.to_string(),
             None => "NA".to_string(),
         };
-        let missing_frac = 1.0 - (shared as f64) / denom;
-        writeln!(
+        let missing_frac = 1.0 - (row.shared as f64) / denom;
+        write!(
             writer,
             "{}\t{}\t{}\t{}\t{}\t{:.4}",
-            samples[i].sample_id, samples[j].sample_id, dist_str, shared, total_loci, missing_frac
+            samples[row.i].sample_id,
+            samples[row.j].sample_id,
+            dist_str,
+            row.shared,
+            total_loci,
+            missing_frac
         )
         .map_err(|e| format!("Write error: {e}"))?;
+        if let (Some(level), Some(d)) = (ci_level, row.distance) {
+            let (dn, lo, hi, reliable) = ci::pair_ci(d, row.h, row.q2, row.shared, total_loci, level);
+            write!(writer, "\t{dn:.2}\t{lo:.2}\t{hi:.2}\t{reliable}")
+                .map_err(|e| format!("Write error: {e}"))?;
+        } else if ci_level.is_some() {
+            write!(writer, "\tNA\tNA\tNA\tNA").map_err(|e| format!("Write error: {e}"))?;
+        }
+        writeln!(writer).map_err(|e| format!("Write error: {e}"))?;
     }
 
     writer.flush().map_err(|e| format!("Flush error: {e}"))?;

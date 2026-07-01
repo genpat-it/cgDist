@@ -1144,8 +1144,35 @@ pub fn calculate_sample_distance_detailed(
     min_loci: usize,
     no_hamming_fallback: bool,
 ) -> (Option<usize>, usize) {
+    let d = calculate_sample_distance_full(
+        sample1,
+        sample2,
+        loci_names,
+        engine,
+        mode,
+        min_loci,
+        no_hamming_fallback,
+    );
+    (d.0, d.1)
+}
+
+/// Full per-pair breakdown for reporting: `(distance, shared_loci, differing_loci,
+/// sum_of_squared_contributions)`. `differing_loci` (h) and the sum of squared
+/// per-locus contributions (q2) feed the missingness confidence interval; they
+/// count only shared loci that actually contribute distance (> 0).
+pub fn calculate_sample_distance_full(
+    sample1: &AllelicProfile,
+    sample2: &AllelicProfile,
+    loci_names: &[String],
+    engine: &DistanceEngine,
+    mode: DistanceMode,
+    min_loci: usize,
+    no_hamming_fallback: bool,
+) -> (Option<usize>, usize, usize, u64) {
     let mut total_distance = 0;
     let mut shared_loci = 0;
+    let mut differing = 0usize;
+    let mut sum_sq = 0u64;
 
     for locus in loci_names {
         let crc1 = sample1
@@ -1163,7 +1190,12 @@ pub fn calculate_sample_distance_detailed(
             shared_loci += 1;
         }
 
-        total_distance += engine.get_distance(locus, crc1, crc2, mode, no_hamming_fallback);
+        let dl = engine.get_distance(locus, crc1, crc2, mode, no_hamming_fallback);
+        total_distance += dl;
+        if dl > 0 {
+            differing += 1;
+            sum_sq += (dl as u64) * (dl as u64);
+        }
     }
 
     let distance = if shared_loci >= min_loci {
@@ -1171,13 +1203,22 @@ pub fn calculate_sample_distance_detailed(
     } else {
         None
     };
-    (distance, shared_loci)
+    (distance, shared_loci, differing, sum_sq)
 }
 
-/// One row of the long-format per-pair quality table: `(i, j, distance, shared_loci)`
-/// for the upper triangle (`i < j`). `distance` is `None` when the pair fails the
-/// `min_loci` filter.
-pub type PairRow = (usize, usize, Option<usize>, usize);
+/// One row of the long-format per-pair quality table (upper triangle, `i < j`).
+/// `distance` is `None` when the pair fails the `min_loci` filter. `h` is the
+/// number of differing shared loci and `q2` the sum of squared per-locus
+/// contributions — both feed the optional missingness confidence interval.
+#[derive(Debug, Clone, Copy)]
+pub struct PairRow {
+    pub i: usize,
+    pub j: usize,
+    pub distance: Option<usize>,
+    pub shared: usize,
+    pub h: usize,
+    pub q2: u64,
+}
 
 /// Compute per-pair distances together with the number of shared loci, in long
 /// format (upper triangle only). Data source for `--emit-pairs` and the HTML
@@ -1196,7 +1237,7 @@ pub fn calculate_pairs_table(
         .into_par_iter()
         .flat_map(|i| {
             (i + 1..n_samples).into_par_iter().map(move |j| {
-                let (distance, shared) = calculate_sample_distance_detailed(
+                let (distance, shared, h, q2) = calculate_sample_distance_full(
                     &samples[i],
                     &samples[j],
                     loci_names,
@@ -1205,7 +1246,7 @@ pub fn calculate_pairs_table(
                     min_loci,
                     no_hamming_fallback,
                 );
-                (i, j, distance, shared)
+                PairRow { i, j, distance, shared, h, q2 }
             })
         })
         .collect()

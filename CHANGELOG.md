@@ -18,7 +18,19 @@ until the API stabilizes).
   pairwise-distance distribution, a clusters-vs-threshold curve, and an
   interactive single-linkage outbreak-clustering explorer.
 
-Both are opt-in and do not change the default distance-matrix output.
+- `--report-ci` (with `--emit-pairs`, level via `--ci-level`, default 0.95):
+  a missingness confidence interval per pair (`dist_norm, ci_low, ci_high,
+  ci_reliable`) accounting for the loci a pair does not share. Uses a
+  deterministic union of an exact Beta-Binomial count interval and a normal
+  compound interval (self-contained ln_gamma / normal_ppf, no new dependency),
+  validated against a Monte-Carlo posterior predictive. `ci_reliable` is `false`
+  in the low-information regime (few differing loci + high missingness), where
+  coverage is information-limited regardless of method.
+- Dashboard (`--report`): Nord color theme, and a recombination view (per-pair
+  recombinant-loci load, top recombinant pairs, per-sample load) shown when an
+  enriched cache provides sequence lengths (`--recomb-threshold`, default 3%).
+
+All of the above are opt-in and do not change the default distance-matrix output.
 
 ## [0.1.2] — 2026-05-26
 
