@@ -30,6 +30,11 @@ pub struct Args {
     #[argh(option, default = "String::from(\"tsv\")")]
     pub format: String,
 
+    /// also emit a long-format per-pair table with data-quality columns
+    /// (sample_i, sample_j, distance, shared_loci, total_loci, missing_frac) to this file
+    #[argh(option)]
+    pub emit_pairs: Option<String>,
+
     /// missing data character (default: -)
     #[argh(option, default = "String::from(\"-\")")]
     pub missing_char: String,

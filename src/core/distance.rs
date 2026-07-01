@@ -1069,6 +1069,32 @@ pub fn calculate_sample_distance(
     min_loci: usize,
     no_hamming_fallback: bool,
 ) -> Option<usize> {
+    calculate_sample_distance_detailed(
+        sample1,
+        sample2,
+        loci_names,
+        engine,
+        mode,
+        min_loci,
+        no_hamming_fallback,
+    )
+    .0
+}
+
+/// Same computation as [`calculate_sample_distance`] but also returns the number
+/// of shared (co-present in both samples) loci the distance was computed over.
+/// Distance semantics are identical (`None` when `shared_loci < min_loci`); the
+/// shared-loci count is always returned so callers can report per-pair data
+/// quality (how many loci a distance actually rests on).
+pub fn calculate_sample_distance_detailed(
+    sample1: &AllelicProfile,
+    sample2: &AllelicProfile,
+    loci_names: &[String],
+    engine: &DistanceEngine,
+    mode: DistanceMode,
+    min_loci: usize,
+    no_hamming_fallback: bool,
+) -> (Option<usize>, usize) {
     let mut total_distance = 0;
     let mut shared_loci = 0;
 
@@ -1091,11 +1117,49 @@ pub fn calculate_sample_distance(
         total_distance += engine.get_distance(locus, crc1, crc2, mode, no_hamming_fallback);
     }
 
-    if shared_loci >= min_loci {
+    let distance = if shared_loci >= min_loci {
         Some(total_distance)
     } else {
         None
-    }
+    };
+    (distance, shared_loci)
+}
+
+/// One row of the long-format per-pair quality table: `(i, j, distance, shared_loci)`
+/// for the upper triangle (`i < j`). `distance` is `None` when the pair fails the
+/// `min_loci` filter.
+pub type PairRow = (usize, usize, Option<usize>, usize);
+
+/// Compute per-pair distances together with the number of shared loci, in long
+/// format (upper triangle only). Data source for `--emit-pairs` and the HTML
+/// dashboard. Parallelized like [`calculate_distance_matrix`]; distance lookups
+/// hit the precomputed cache, so this is cheap despite re-deriving the pairs.
+pub fn calculate_pairs_table(
+    samples: &[AllelicProfile],
+    loci_names: &[String],
+    engine: &DistanceEngine,
+    mode: DistanceMode,
+    min_loci: usize,
+    no_hamming_fallback: bool,
+) -> Vec<PairRow> {
+    let n_samples = samples.len();
+    (0..n_samples)
+        .into_par_iter()
+        .flat_map(|i| {
+            (i + 1..n_samples).into_par_iter().map(move |j| {
+                let (distance, shared) = calculate_sample_distance_detailed(
+                    &samples[i],
+                    &samples[j],
+                    loci_names,
+                    engine,
+                    mode,
+                    min_loci,
+                    no_hamming_fallback,
+                );
+                (i, j, distance, shared)
+            })
+        })
+        .collect()
 }
 
 /// Calculate full distance matrix

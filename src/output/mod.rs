@@ -215,6 +215,61 @@ pub fn write_nexus(
     Ok(())
 }
 
+/// Write a long-format per-pair table with data-quality columns.
+///
+/// Columns: `sample_i  sample_j  distance  shared_loci  total_loci  missing_frac`.
+/// One row per upper-triangle pair. `distance` is `NA` when the pair failed the
+/// `--min-loci` filter. `missing_frac = 1 - shared_loci / total_loci` is the
+/// fraction of the schema unavailable for the pair — a distance resting on few
+/// shared loci is less reliable. Opt-in via `--emit-pairs`; does not affect the
+/// square-matrix output.
+pub fn write_pairs_long(
+    file_path: &str,
+    samples: &[AllelicProfile],
+    rows: &[(usize, usize, Option<usize>, usize)],
+    total_loci: usize,
+    command_line: &str,
+) -> Result<(), String> {
+    ensure_parent_dir(file_path)?;
+    let file = File::create(file_path)
+        .map_err(|e| format!("Failed to create output file '{file_path}': {e}"))?;
+    let mut writer = BufWriter::new(file);
+
+    writeln!(writer, "# Command: {command_line}").map_err(|e| format!("Write error: {e}"))?;
+    writeln!(
+        writer,
+        "# Generated: {}",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    )
+    .map_err(|e| format!("Write error: {e}"))?;
+    writeln!(writer, "# cgDist v{}", env!("CARGO_PKG_VERSION"))
+        .map_err(|e| format!("Write error: {e}"))?;
+    writeln!(
+        writer,
+        "sample_i\tsample_j\tdistance\tshared_loci\ttotal_loci\tmissing_frac"
+    )
+    .map_err(|e| format!("Write error: {e}"))?;
+
+    let denom = total_loci.max(1) as f64;
+    for &(i, j, distance, shared) in rows {
+        let dist_str = match distance {
+            Some(d) => d.to_string(),
+            None => "NA".to_string(),
+        };
+        let missing_frac = 1.0 - (shared as f64) / denom;
+        writeln!(
+            writer,
+            "{}\t{}\t{}\t{}\t{}\t{:.4}",
+            samples[i].sample_id, samples[j].sample_id, dist_str, shared, total_loci, missing_frac
+        )
+        .map_err(|e| format!("Write error: {e}"))?;
+    }
+
+    writer.flush().map_err(|e| format!("Flush error: {e}"))?;
+    println!("✅ Per-pair quality table written to: {file_path}");
+    Ok(())
+}
+
 /// Write distance matrix in the specified format
 pub fn write_matrix(
     file_path: &str,

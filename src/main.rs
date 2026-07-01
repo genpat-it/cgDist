@@ -481,6 +481,30 @@ fn run_main() -> Result<(), String> {
         std::process::exit(1);
     }
 
+    // Optional: long-format per-pair quality table (--emit-pairs). Opt-in; the
+    // pairs are re-derived from the (cached) distances, so this is cheap.
+    if let Some(ref pairs_path) = args.emit_pairs {
+        println!("\n📋 Emitting per-pair quality table...");
+        let pair_rows = calculate_pairs_table(
+            &matrix.samples,
+            &matrix.loci_names,
+            &engine,
+            validation_result.distance_mode,
+            args.min_loci,
+            !args.hamming_fallback,
+        );
+        if let Err(e) = write_pairs_long(
+            pairs_path,
+            &matrix.samples,
+            &pair_rows,
+            matrix.loci_names.len(),
+            &command_line,
+        ) {
+            eprintln!("❌ ERROR writing per-pair table: {e}");
+            std::process::exit(1);
+        }
+    }
+
     // Save cache if specified (skip for hamming hasher) and only if there are new entries
     if args.hasher_type != "hamming" {
         if let Some(ref cache_path) = args.cache_file {

@@ -54,12 +54,14 @@ pub mod output;
 // Convenience prelude for common imports
 pub mod prelude {
     pub use crate::cli::{validate_args, Args, ValidationResult};
-    pub use crate::core::{calculate_distance_matrix, calculate_sample_distance};
+    pub use crate::core::{
+        calculate_distance_matrix, calculate_pairs_table, calculate_sample_distance, PairRow,
+    };
     pub use crate::core::{AlignmentConfig, DistanceEngine, DistanceMode};
     pub use crate::data::{AllelicMatrix, AllelicProfile, SequenceDatabase, SequenceInfo};
     pub use crate::hashers::{AlleleHash, AlleleHashPair, AlleleHasher, HasherRegistry};
     pub use crate::hashers::{Crc32Hasher, Md5Hasher, SequenceHasher, Sha256Hasher};
-    pub use crate::output::write_matrix;
+    pub use crate::output::{write_matrix, write_pairs_long};
 }
 
 // Re-export main types at the root level for convenience
