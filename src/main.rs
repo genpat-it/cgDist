@@ -510,11 +510,23 @@ fn run_main() -> Result<(), String> {
 
         if let Some(ref report_path) = args.report {
             println!("📊 Rendering analyst dashboard...");
+            // Recombination view is available only with an enriched cache (lengths).
+            let recomb = calculate_pairs_recombination(
+                &matrix.samples,
+                &matrix.loci_names,
+                &engine,
+                args.recomb_threshold / 100.0,
+            );
+            if recomb.is_some() {
+                println!("   🧬 Recombination signal included (density > {:.1}%)", args.recomb_threshold);
+            }
             if let Err(e) = write_html_report(
                 report_path,
                 &matrix.samples,
                 &matrix.loci_names,
                 &pair_rows,
+                recomb.as_deref(),
+                args.recomb_threshold / 100.0,
                 &args.mode,
                 &args.hasher_type,
                 &command_line,

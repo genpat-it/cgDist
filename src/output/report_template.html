@@ -5,13 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cgDist analyst dashboard</title>
 <style>
-  :root{--bg:#0f1420;--panel:#1a2233;--ink:#e6edf6;--mut:#8ba0bd;--line:#2b3a54;
-        --accent:#4aa3ff;--good:#3ecf8e;--warn:#ffb454;--bad:#ff6b6b;}
+  /* Nord palette (calm / clinical) */
+  :root{--bg:#eceff4;--panel:#ffffff;--ink:#2e3440;--mut:#4c566a;--line:#d8dee9;
+        --accent:#5e81ac;--teal:#88c0d0;--good:#a3be8c;--warn:#ebcb8b;--bad:#bf616a;--purple:#b48ead;}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
        font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
   header{padding:18px 26px;border-bottom:1px solid var(--line);
-         background:linear-gradient(180deg,#182036,#131a2b)}
+         background:linear-gradient(180deg,#e5e9f0,#eceff4)}
   h1{margin:0;font-size:19px;letter-spacing:.3px}
   h1 span{color:var(--accent)}
   .sub{color:var(--mut);font-size:12px;margin-top:4px}
@@ -34,9 +35,9 @@
   th:hover{color:var(--ink)}
   .tblwrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px}
   .pill{padding:1px 7px;border-radius:20px;font-size:11px}
-  .p-good{background:rgba(62,207,142,.15);color:var(--good)}
-  .p-warn{background:rgba(255,180,84,.15);color:var(--warn)}
-  .p-bad{background:rgba(255,107,107,.15);color:var(--bad)}
+  .p-good{background:rgba(163,190,140,.28);color:#4f6b3a}
+  .p-warn{background:rgba(235,203,139,.35);color:#9a7d2e}
+  .p-bad{background:rgba(191,97,106,.22);color:#a3454e}
   .explorer{display:grid;grid-template-columns:1fr;gap:16px}
   .ctl{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   input[type=range]{flex:1;min-width:220px;accent-color:var(--accent)}
@@ -45,7 +46,7 @@
   .clist{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px}
   .clus{border-bottom:1px solid var(--line);padding:6px 8px}
   .clus b{color:var(--accent)} .clus .mem{color:var(--mut);font-size:12px}
-  code{background:#0c1220;padding:2px 6px;border-radius:5px;color:#9fc7ff;font-size:12px}
+  code{background:#e5e9f0;padding:2px 6px;border-radius:5px;color:#5e81ac;font-size:12px}
   .foot{color:var(--mut);font-size:11px;margin-top:8px}
 </style>
 </head>
@@ -77,6 +78,16 @@
     </div>
     <svg id="curve" viewBox="0 0 900 220" style="margin-top:14px"></svg>
     <div class="hint" style="margin-top:6px">Clusters vs threshold (grey), size of largest cluster (blue). The current threshold is marked.</div>
+  </section>
+
+  <section id="recsec" style="display:none">
+    <h2>Recombination</h2>
+    <div class="hint">Per-locus mutation density (SNPs + InDel bases ÷ allele length) above the threshold flags a locus as recombinant. High recombination inflates distances and breaks the clock — worth knowing before you cluster. <span id="recnote"></span></div>
+    <div class="estat" id="recstat"></div>
+    <svg id="rechist" viewBox="0 0 900 220" style="margin-top:8px"></svg>
+    <div class="hint" style="margin-top:6px">Recombinant loci per pair. A long right tail = recombinogenic lineages.</div>
+    <h3 style="font-size:13px;margin:14px 0 6px;color:var(--mut)">Most recombinant pairs</h3>
+    <div class="tblwrap" style="max-height:240px"><table id="rectbl"></table></div>
   </section>
 
   <section>
@@ -117,7 +128,7 @@ $('#cards').innerHTML = cards.map(([k,v])=>`<div class="card"><div class="k">${k
   let svg=`<g class="axis"><line x1="${pad}" y1="${Ht-pad}" x2="${W-pad}" y2="${Ht-pad}"/><line x1="${pad}" y1="${pad-8}" x2="${pad}" y2="${Ht-pad}"/></g>`;
   H.counts.forEach((c,i)=>{
     const h=(c/max)*(Ht-2*pad), x=pad+i*bw, y=Ht-pad-h;
-    svg+=`<rect x="${x+0.5}" y="${y}" width="${Math.max(1,bw-1)}" height="${h}" fill="#4aa3ff" opacity="0.85"><title>${H.bin_edges[i].toFixed(0)}–${H.bin_edges[i+1].toFixed(0)}: ${c}</title></rect>`;
+    svg+=`<rect x="${x+0.5}" y="${y}" width="${Math.max(1,bw-1)}" height="${h}" fill="#5e81ac" opacity="0.9"><title>${H.bin_edges[i].toFixed(0)}–${H.bin_edges[i+1].toFixed(0)}: ${c}</title></rect>`;
   });
   for(let k=0;k<=4;k++){const x=pad+k/4*(W-2*pad);svg+=`<text x="${x}" y="${Ht-pad+16}" text-anchor="middle">${(H.bin_edges[0]+k/4*(H.bin_edges[n]-H.bin_edges[0])).toFixed(0)}</text>`;}
   svg+=`<text x="${pad}" y="${pad-14}">count</text><text x="${W-pad}" y="${Ht-8}" text-anchor="end">distance</text>`;
@@ -133,12 +144,12 @@ function drawCurve(t){
   const Yc=v=>Ht-pad-(v/maxC)*(Ht-2*pad);
   const Yl=v=>Ht-pad-(v/(maxL||1))*(Ht-2*pad);
   let g=`<g class="axis"><line x1="${pad}" y1="${Ht-pad}" x2="${W-pad}" y2="${Ht-pad}"/></g>`;
-  g+='<polyline fill="none" stroke="#8ba0bd" stroke-width="2" points="'+C.map((d,i)=>X(i)+','+Yc(d.n_clusters)).join(' ')+'"/>';
-  g+='<polyline fill="none" stroke="#4aa3ff" stroke-width="2" points="'+C.map((d,i)=>X(i)+','+Yl(d.largest)).join(' ')+'"/>';
+  g+='<polyline fill="none" stroke="#4c566a" stroke-width="2" points="'+C.map((d,i)=>X(i)+','+Yc(d.n_clusters)).join(' ')+'"/>';
+  g+='<polyline fill="none" stroke="#5e81ac" stroke-width="2" points="'+C.map((d,i)=>X(i)+','+Yl(d.largest)).join(' ')+'"/>';
   const tx=X(Math.min(t,n-1));
-  g+=`<line x1="${tx}" y1="${pad-6}" x2="${tx}" y2="${Ht-pad}" stroke="#ffb454" stroke-dasharray="4 3"/>`;
+  g+=`<line x1="${tx}" y1="${pad-6}" x2="${tx}" y2="${Ht-pad}" stroke="#d08770" stroke-dasharray="4 3"/>`;
   for(let k=0;k<=5;k++){const x=pad+k/5*(W-2*pad);g+=`<text x="${x}" y="${Ht-pad+16}" text-anchor="middle">${Math.round(k/5*(n-1))}</text>`;}
-  g+=`<text x="${pad}" y="${pad-16}" fill="#8ba0bd">#clusters</text><text x="${W-pad}" y="${pad-16}" text-anchor="end" fill="#4aa3ff">largest cluster</text>`;
+  g+=`<text x="${pad}" y="${pad-16}" fill="#4c566a">#clusters</text><text x="${W-pad}" y="${pad-16}" text-anchor="end" fill="#5e81ac">largest cluster</text>`;
   $('#curve').innerHTML=g;
 }
 
@@ -184,22 +195,49 @@ function renderTable(){
   const S=DATA.samples.slice().sort((a,b)=>{
     let x=a[sortKey],y=b[sortKey]; if(x===null)x=Infinity; if(y===null)y=Infinity;
     if(typeof x==='string')return sortDir*x.localeCompare(y); return sortDir*(x-y);});
+  const hasRec=!!DATA.recombination;
   const cols=[['id','Sample'],['completeness','Completeness'],['nn_dist','NN distance'],['nn_id','Nearest neighbour'],['mean_shared','Mean shared loci']];
+  if(hasRec)cols.push(['recomb_load','Recomb. loci (mean)']);
   let h='<thead><tr>'+cols.map(c=>`<th data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr></thead><tbody>';
   for(const r of S){
     h+=`<tr><td>${esc(r.id)}</td><td>${badge(r.completeness)}</td>`+
        `<td>${r.nn_dist===null?'—':r.nn_dist}</td><td>${r.nn_id?esc(r.nn_id):'—'}</td>`+
-       `<td>${r.mean_shared}</td></tr>`;
+       `<td>${r.mean_shared}</td>`+(hasRec?`<td>${r.recomb_load}</td>`:'')+`</tr>`;
   }
   $('#stbl').innerHTML=h+'</tbody>';
   $('#stbl').querySelectorAll('th').forEach(th=>th.onclick=()=>{
     const k=th.dataset.k; sortDir=(k===sortKey)?-sortDir:1; sortKey=k; renderTable();});
 }
 
+// ---- recombination section (only if data present) ----
+function renderRecomb(){
+  const R=DATA.recombination; if(!R){return;}
+  $('#recsec').style.display='';
+  $('#recnote').textContent=`Threshold: density > ${R.threshold_pct}%.`;
+  $('#recstat').innerHTML=[
+    ['Pairs with recombination',`${R.pairs_with_recomb} (${pct(R.frac_pairs_with_recomb)})`],
+    ['Mean recombinant loci / pair',R.mean_per_pair],
+    ['Max recombinant loci (a pair)',R.max_per_pair],
+  ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  // histogram
+  const C=R.hist_counts, W=900,Ht=220,pad=38, n=C.length, max=Math.max(1,...C), bw=(W-2*pad)/n;
+  let g=`<g class="axis"><line x1="${pad}" y1="${Ht-pad}" x2="${W-pad}" y2="${Ht-pad}"/></g>`;
+  C.forEach((c,i)=>{const hh=(c/max)*(Ht-2*pad),x=pad+i*bw,y=Ht-pad-hh;
+    g+=`<rect x="${x+0.5}" y="${y}" width="${Math.max(1,bw-1)}" height="${hh}" fill="#b48ead" opacity="0.9"><title>${(i/(n-1)*R.hist_max).toFixed(0)} loci: ${c}</title></rect>`;});
+  for(let k=0;k<=4;k++){const x=pad+k/4*(W-2*pad);g+=`<text x="${x}" y="${Ht-pad+16}" text-anchor="middle">${Math.round(k/4*R.hist_max)}</text>`;}
+  g+=`<text x="${pad}" y="${pad-14}">pairs</text><text x="${W-pad}" y="${Ht-8}" text-anchor="end">recombinant loci in pair</text>`;
+  $('#rechist').innerHTML=g;
+  // top pairs
+  let t='<thead><tr><th>Sample i</th><th>Sample j</th><th>Recombinant loci</th></tr></thead><tbody>';
+  t+=R.top_pairs.map(p=>`<tr><td>${esc(p.i)}</td><td>${esc(p.j)}</td><td>${p.recomb}</td></tr>`).join('');
+  $('#rectbl').innerHTML=t+'</tbody>';
+}
+
 // ---- init ----
 const t0=Math.min(7,DATA.embed_cap);
 $('#thr').value=t0;
 renderExplorer(t0);
+renderRecomb();
 renderTable();
 </script>
 </body>

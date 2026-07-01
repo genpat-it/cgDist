@@ -19,6 +19,9 @@ struct CacheEntry {
     snps: usize,
     indel_events: usize,
     indel_bases: usize,
+    /// Mean of the two aligned allele lengths (bp), when available (enriched
+    /// cache only). Enables per-locus mutation-density / recombination signals.
+    len: Option<u32>,
 }
 
 /// Distance calculation engine
@@ -193,6 +196,43 @@ impl DistanceEngine {
         }
     }
 
+    /// Whether per-locus mutation-density (recombination) signals are available,
+    /// i.e. the loaded cache carries sequence lengths (enriched cache) and the
+    /// hasher is sequence-based. Used to decide whether to include recombination
+    /// in the dashboard.
+    pub fn has_recomb_data(&self) -> bool {
+        self.hasher_type != "hamming" && self.cache.values().any(|e| e.len.is_some())
+    }
+
+    /// Per-locus recombination signal for an allele pair: `Some(true)` if the
+    /// mutation density (SNPs + InDel bases) / allele length exceeds
+    /// `thresh_frac` (e.g. 0.03 = 3%), `Some(false)` if below, `None` when the
+    /// pair is missing/identical or length data is unavailable.
+    pub fn locus_is_recombinant(
+        &self,
+        locus: &str,
+        crc1: u32,
+        crc2: u32,
+        thresh_frac: f64,
+    ) -> Option<bool> {
+        if crc1 == u32::MAX || crc2 == u32::MAX || crc1 == crc2 || self.hasher_type == "hamming" {
+            return None;
+        }
+        let (min_crc, max_crc) = if crc1 <= crc2 { (crc1, crc2) } else { (crc2, crc1) };
+        let key = DistanceCacheKey {
+            locus: locus.to_string(),
+            crc1: min_crc,
+            crc2: max_crc,
+        };
+        let entry = self.cache.get(&key)?;
+        let len = entry.len?;
+        if len == 0 {
+            return None;
+        }
+        let density = (entry.snps + entry.indel_bases) as f64 / len as f64;
+        Some(density > thresh_frac)
+    }
+
     /// Add distance to cache (optimized) - stores all alignment statistics
     pub fn cache_distance(
         &mut self,
@@ -217,6 +257,7 @@ impl DistanceEngine {
             snps,
             indel_events,
             indel_bases,
+            len: None, // fresh compute: lengths added only via enriched cache
         };
         self.cache.insert(key, entry);
         self.has_new_entries = true; // Mark that cache has new entries
@@ -453,10 +494,17 @@ impl DistanceEngine {
                         crc1: parts[1].parse().unwrap_or(0),
                         crc2: parts[2].parse().unwrap_or(0),
                     };
+                    let len = match (cache_value.seq1_length, cache_value.seq2_length) {
+                        (Some(a), Some(b)) => Some(((a + b) / 2) as u32),
+                        (Some(a), None) => Some(a as u32),
+                        (None, Some(b)) => Some(b as u32),
+                        (None, None) => None,
+                    };
                     let entry = CacheEntry {
                         snps: cache_value.snps,
                         indel_events: cache_value.indel_events,
                         indel_bases: cache_value.indel_bases,
+                        len,
                     };
                     self.cache.insert(key, entry);
                 }
@@ -506,6 +554,7 @@ impl DistanceEngine {
                     snps,
                     indel_events,
                     indel_bases,
+                    len: None, // legacy cache carries no sequence lengths
                 };
                 self.cache.insert(key, entry);
             }
@@ -1160,6 +1209,47 @@ pub fn calculate_pairs_table(
             })
         })
         .collect()
+}
+
+/// Per-pair recombination load: number of loci whose mutation density exceeds
+/// `thresh_frac`, in the same upper-triangle order as [`calculate_pairs_table`].
+/// Returns `None` when the engine has no length data (non-enriched cache /
+/// hamming hasher), so callers can hide the recombination view gracefully.
+pub fn calculate_pairs_recombination(
+    samples: &[AllelicProfile],
+    loci_names: &[String],
+    engine: &DistanceEngine,
+    thresh_frac: f64,
+) -> Option<Vec<u32>> {
+    if !engine.has_recomb_data() {
+        return None;
+    }
+    let n_samples = samples.len();
+    let out = (0..n_samples)
+        .into_par_iter()
+        .flat_map(|i| {
+            (i + 1..n_samples).into_par_iter().map(move |j| {
+                let mut recomb = 0u32;
+                for locus in loci_names {
+                    let crc1 = samples[i]
+                        .loci_hashes
+                        .get(locus)
+                        .and_then(|h| h.as_crc32())
+                        .unwrap_or(u32::MAX);
+                    let crc2 = samples[j]
+                        .loci_hashes
+                        .get(locus)
+                        .and_then(|h| h.as_crc32())
+                        .unwrap_or(u32::MAX);
+                    if engine.locus_is_recombinant(locus, crc1, crc2, thresh_frac) == Some(true) {
+                        recomb += 1;
+                    }
+                }
+                recomb
+            })
+        })
+        .collect();
+    Some(out)
 }
 
 /// Calculate full distance matrix

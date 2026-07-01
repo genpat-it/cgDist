@@ -62,6 +62,8 @@ pub fn write_html_report(
     samples: &[AllelicProfile],
     loci_names: &[String],
     pair_rows: &[PairRow],
+    recomb: Option<&[u32]>,
+    recomb_threshold: f64,
     mode: &str,
     hasher: &str,
     command_line: &str,
@@ -180,7 +182,63 @@ pub fn write_html_report(
         .collect();
     let truncated = embed_cap < t_ceiling;
 
+    // --- recombination (optional; only when enriched-cache length data present) ---
+    let mut recomb_sample = vec![0f64; n];       // mean recombinant loci per sample's pairs
+    let mut recomb_json = Value::Null;
+    if let Some(rc) = recomb {
+        let mut sum = vec![0u64; n];
+        let mut per_pair: Vec<usize> = Vec::with_capacity(rc.len());
+        let mut top: Vec<(usize, usize, u32)> = Vec::new();
+        let mut pairs_with_recomb = 0usize;
+        let mut max_rc = 0u32;
+        for (&(i, j, _, _), &r) in pair_rows.iter().zip(rc.iter()) {
+            sum[i] += r as u64;
+            sum[j] += r as u64;
+            per_pair.push(r as usize);
+            if r > 0 {
+                pairs_with_recomb += 1;
+                top.push((i, j, r));
+            }
+            max_rc = max_rc.max(r);
+        }
+        for i in 0..n {
+            recomb_sample[i] = if shared_cnt[i] > 0 {
+                sum[i] as f64 / shared_cnt[i] as f64
+            } else {
+                0.0
+            };
+        }
+        top.sort_by(|a, b| b.2.cmp(&a.2));
+        let top_json: Vec<Value> = top
+            .iter()
+            .take(30)
+            .map(|&(i, j, r)| {
+                json!({"i": samples[i].sample_id, "j": samples[j].sample_id, "recomb": r})
+            })
+            .collect();
+        // histogram of recombinant-loci-per-pair
+        let rmax = (max_rc as usize).max(1);
+        let rbins = 30usize.min(rmax + 1);
+        let mut rcounts = vec![0u64; rbins];
+        for &v in &per_pair {
+            let b = ((v as f64 / rmax as f64) * (rbins as f64 - 1.0)).round() as usize;
+            rcounts[b.min(rbins - 1)] += 1;
+        }
+        let mean_rc = per_pair.iter().sum::<usize>() as f64 / per_pair.len().max(1) as f64;
+        recomb_json = json!({
+            "threshold_pct": (recomb_threshold * 100.0 * 100.0).round() / 100.0,
+            "mean_per_pair": (mean_rc * 100.0).round() / 100.0,
+            "max_per_pair": max_rc,
+            "pairs_with_recomb": pairs_with_recomb,
+            "frac_pairs_with_recomb": ((pairs_with_recomb as f64 / per_pair.len().max(1) as f64) * 1e4).round() / 1e4,
+            "hist_counts": rcounts,
+            "hist_max": rmax,
+            "top_pairs": top_json,
+        });
+    }
+
     // --- per-sample records ---
+    let has_recomb = recomb.is_some();
     let sample_json: Vec<Value> = (0..n)
         .map(|i| {
             json!({
@@ -192,6 +250,7 @@ pub fn write_html_report(
                 "mean_shared": if shared_cnt[i] > 0 {
                     (shared_sum[i] as f64 / shared_cnt[i] as f64).round()
                 } else { 0.0 },
+                "recomb_load": if has_recomb { json!((recomb_sample[i] * 100.0).round() / 100.0) } else { Value::Null },
             })
         })
         .collect();
@@ -220,6 +279,7 @@ pub fn write_html_report(
         },
         "hist": { "bin_edges": bin_edges, "counts": counts },
         "cluster_curve": curve,
+        "recombination": recomb_json,
         "samples": sample_json,
         "edges": embed_edges,
         "embed_cap": embed_cap,

@@ -40,6 +40,12 @@ pub struct Args {
     #[argh(option)]
     pub report: Option<String>,
 
+    /// per-locus mutation-density threshold (percent) for the dashboard's
+    /// recombination view; a locus above this density counts as recombinant.
+    /// Requires an enriched cache (sequence lengths). Default: 3.0
+    #[argh(option, default = "3.0")]
+    pub recomb_threshold: f64,
+
     /// missing data character (default: -)
     #[argh(option, default = "String::from(\"-\")")]
     pub missing_char: String,

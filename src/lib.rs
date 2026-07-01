@@ -55,7 +55,8 @@ pub mod output;
 pub mod prelude {
     pub use crate::cli::{validate_args, Args, ValidationResult};
     pub use crate::core::{
-        calculate_distance_matrix, calculate_pairs_table, calculate_sample_distance, PairRow,
+        calculate_distance_matrix, calculate_pairs_recombination, calculate_pairs_table,
+        calculate_sample_distance, PairRow,
     };
     pub use crate::core::{AlignmentConfig, DistanceEngine, DistanceMode};
     pub use crate::data::{AllelicMatrix, AllelicProfile, SequenceDatabase, SequenceInfo};
