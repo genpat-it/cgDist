@@ -234,7 +234,7 @@ fn analyze_alignment_config(cache: &UltraFastCache, args: &Args) {
             "dna" => {
                 println!("🎯 Standard DNA mode (BWA-MEM style)");
                 println!("   - Balanced parameters for typical bacterial genomes");
-                println!("   - Good for core genome MLST analysis");
+                println!("   - Good for cg/wgMLST analysis");
             }
             "dna-strict" => {
                 println!("🎯 Strict DNA mode (HOXD style)");
