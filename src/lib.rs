@@ -1,10 +1,10 @@
 // lib.rs - cgdist library root
 
-//! # cgdist - High-performance SNP/indel-level distance calculator for core genome MLST analysis
+//! # cgdist - High-performance SNP/indel-level distance calculator for core and whole genome MLST (cg/wgMLST) analysis
 //!
 //! This library provides a high-performance implementation for calculating genetic distances
-//! between bacterial samples using core genome MLST (cgMLST) data. It supports multiple
-//! hashing algorithms and is compatible with chewBACCA allele calling.
+//! between bacterial samples using core and whole genome MLST (cg/wgMLST) data. It supports
+//! multiple hashing algorithms and is compatible with chewBACCA allele calling.
 //!
 //! ## Features
 //!

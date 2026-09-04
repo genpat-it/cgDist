@@ -8,7 +8,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18025926.svg)](https://doi.org/10.5281/zenodo.18025926)
 [![bioRxiv](https://img.shields.io/badge/bioRxiv-10.1101%2F2025.10.16.682749-bd2024)](https://doi.org/10.1101/2025.10.16.682749)
 
-**Ultra-fast SNP/indel-level distance calculator for core genome MLST analysis**
+**Ultra-fast SNP/indel-level distance calculator for core and whole genome MLST (cg/wgMLST) analysis**
 
 cgDist is a high-performance Rust implementation for calculating genetic distances in bacterial genomics, specifically designed for epidemiological outbreak investigations and phylogenetic analysis.
 
