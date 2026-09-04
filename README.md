@@ -6,7 +6,7 @@
 [![CI](https://github.com/genpat-it/cgDist/actions/workflows/ci-and-docker.yml/badge.svg)](https://github.com/genpat-it/cgDist/actions/workflows/ci-and-docker.yml)
 [![GitHub release](https://img.shields.io/github/v/release/genpat-it/cgDist?label=release&color=blue)](https://github.com/genpat-it/cgDist/releases/latest)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18025926.svg)](https://doi.org/10.5281/zenodo.18025926)
-[![bioRxiv](https://img.shields.io/badge/bioRxiv-10.1101%2F2025.10.16.682749-bd2024)](https://doi.org/10.1101/2025.10.16.682749)
+[![NAR Genom Bioinform](https://img.shields.io/badge/NAR%20Genom%20Bioinform-10.1093%2Fnargab%2Flqag090-1a7f37)](https://doi.org/10.1093/nargab/lqag090)
 
 **Ultra-fast SNP/indel-level distance calculator for core and whole genome MLST (cg/wgMLST) analysis**
 
@@ -761,21 +761,26 @@ else:
 
 ## 📜 Citation
 
-If you use cgDist in your research, please cite our preprint:
+If you use cgDist in your research, please cite:
 
-**de Ruvo, A.; Castelli, P.; Bucciacchio, A.; Mangone, I.; Mixao, V.; Borges, V.; Radomski, N.; Di Pasquale, A.** (2025). *cgDist: An Enhanced Algorithm for Efficient Calculation of pairwise SNP and InDel differences from Core Genome Multilocus Sequence Typing*. bioRxiv. DOI: [10.1101/2025.10.16.682749](https://doi.org/10.1101/2025.10.16.682749)
+**de Ruvo, A.; Castelli, P.; Bucciacchio, A.; Mangone, I.; Mixão, V.; Borges, V.; Flammini, M.; Radomski, N.; Di Pasquale, A.** (2026). *cgDist: Nucleotide-level distance calculation from cgMLST allelic profiles*. NAR Genomics and Bioinformatics, 8(3), lqag090. DOI: [10.1093/nargab/lqag090](https://doi.org/10.1093/nargab/lqag090)
 
 ```bibtex
-@article{deruvo2025cgdist,
-  title = {cgDist: An Enhanced Algorithm for Efficient Calculation of pairwise SNP and InDel differences from Core Genome Multilocus Sequence Typing},
-  author = {de Ruvo, Andrea and Castelli, Pierluigi and Bucciacchio, Andrea and Mangone, Iolanda and Mixao, Verónica and Borges, Vítor and Radomski, Nicolas and Di Pasquale, Adriano},
-  year = {2025},
-  month = {October},
-  doi = {10.1101/2025.10.16.682749},
-  journal = {bioRxiv},
-  note = {Preprint. Software: https://github.com/genpat-it/cgDist}
+@article{deruvo2026cgdist,
+  title = {cgDist: Nucleotide-level distance calculation from cgMLST allelic profiles},
+  author = {de Ruvo, Andrea and Castelli, Pierluigi and Bucciacchio, Andrea and Mangone, Iolanda and Mixão, Verónica and Borges, Vítor and Flammini, Michele and Radomski, Nicolas and Di Pasquale, Adriano},
+  year = {2026},
+  journal = {NAR Genomics and Bioinformatics},
+  volume = {8},
+  number = {3},
+  pages = {lqag090},
+  doi = {10.1093/nargab/lqag090},
+  note = {Software: https://github.com/genpat-it/cgDist}
 }
 ```
+
+The earlier preprint remains available on bioRxiv
+([10.1101/2025.10.16.682749](https://doi.org/10.1101/2025.10.16.682749)).
 
 ## 📞 Support
 
