@@ -496,7 +496,11 @@ fn run_main() -> Result<(), String> {
         );
 
         if let Some(ref pairs_path) = args.emit_pairs {
-            let ci_level = if args.report_ci { Some(args.ci_level) } else { None };
+            let ci_level = if args.report_ci {
+                Some(args.ci_level)
+            } else {
+                None
+            };
             if let Err(e) = write_pairs_long(
                 pairs_path,
                 &matrix.samples,
@@ -520,7 +524,10 @@ fn run_main() -> Result<(), String> {
                 args.recomb_threshold / 100.0,
             );
             if recomb.is_some() {
-                println!("   🧬 Recombination signal included (density > {:.1}%)", args.recomb_threshold);
+                println!(
+                    "   🧬 Recombination signal included (density > {:.1}%)",
+                    args.recomb_threshold
+                );
             }
             if let Err(e) = write_html_report(
                 report_path,

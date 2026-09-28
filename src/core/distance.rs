@@ -218,7 +218,11 @@ impl DistanceEngine {
         if crc1 == u32::MAX || crc2 == u32::MAX || crc1 == crc2 || self.hasher_type == "hamming" {
             return None;
         }
-        let (min_crc, max_crc) = if crc1 <= crc2 { (crc1, crc2) } else { (crc2, crc1) };
+        let (min_crc, max_crc) = if crc1 <= crc2 {
+            (crc1, crc2)
+        } else {
+            (crc2, crc1)
+        };
         let key = DistanceCacheKey {
             locus: locus.to_string(),
             crc1: min_crc,
@@ -1246,7 +1250,14 @@ pub fn calculate_pairs_table(
                     min_loci,
                     no_hamming_fallback,
                 );
-                PairRow { i, j, distance, shared, h, q2 }
+                PairRow {
+                    i,
+                    j,
+                    distance,
+                    shared,
+                    h,
+                    q2,
+                }
             })
         })
         .collect()

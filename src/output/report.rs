@@ -17,8 +17,12 @@ const EMBED_BUDGET: usize = 150_000; // max edges embedded for the interactive e
 
 fn ensure_parent_dir(file_path: &str) -> Result<(), String> {
     if let Some(parent) = Path::new(file_path).parent() {
-        create_dir_all(parent)
-            .map_err(|e| format!("Failed to create parent directory '{}': {e}", parent.display()))?;
+        create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create parent directory '{}': {e}",
+                parent.display()
+            )
+        })?;
     }
     Ok(())
 }
@@ -31,7 +35,11 @@ struct UnionFind {
 }
 impl UnionFind {
     fn new(n: usize) -> Self {
-        Self { parent: (0..n).collect(), size: vec![1; n], n_components: n }
+        Self {
+            parent: (0..n).collect(),
+            size: vec![1; n],
+            n_components: n,
+        }
     }
     fn find(&mut self, mut x: usize) -> usize {
         while self.parent[x] != x {
@@ -45,7 +53,11 @@ impl UnionFind {
         if ra == rb {
             return;
         }
-        let (big, small) = if self.size[ra] >= self.size[rb] { (ra, rb) } else { (rb, ra) };
+        let (big, small) = if self.size[ra] >= self.size[rb] {
+            (ra, rb)
+        } else {
+            (rb, ra)
+        };
         self.parent[small] = big;
         self.size[big] += self.size[small];
         self.n_components -= 1;
@@ -80,7 +92,12 @@ pub fn write_html_report(
         .map(|s| {
             let present = loci_names
                 .iter()
-                .filter(|l| s.loci_hashes.get(*l).map(|h| !h.is_missing()).unwrap_or(false))
+                .filter(|l| {
+                    s.loci_hashes
+                        .get(*l)
+                        .map(|h| !h.is_missing())
+                        .unwrap_or(false)
+                })
                 .count();
             present as f64 / denom
         })
@@ -143,8 +160,9 @@ pub fn write_html_report(
         let b = (((d as f64) / span) * (n_bins as f64 - 1.0)).round() as usize;
         counts[b.min(n_bins - 1)] += 1;
     }
-    let bin_edges: Vec<f64> =
-        (0..=n_bins).map(|b| (b as f64) * span / (n_bins as f64)).collect();
+    let bin_edges: Vec<f64> = (0..=n_bins)
+        .map(|b| (b as f64) * span / (n_bins as f64))
+        .collect();
 
     // --- clusters-vs-threshold curve (incremental single-linkage over sorted edges) ---
     // Choose a threshold ceiling covering the epidemiologically interesting range.
@@ -189,14 +207,15 @@ pub fn write_html_report(
         .iter()
         .filter(|e| e.2 <= embed_cap)
         .map(|&(i, j, d, shared, h, q2)| {
-            let (_dn, lo, hi, _rel) = crate::output::ci::pair_ci(d, h, q2, shared, n_loci, ci_level);
+            let (_dn, lo, hi, _rel) =
+                crate::output::ci::pair_ci(d, h, q2, shared, n_loci, ci_level);
             json!([i, j, d, (lo.round() as i64), (hi.round() as i64)])
         })
         .collect();
     let truncated = embed_cap < t_ceiling;
 
     // --- recombination (optional; only when enriched-cache length data present) ---
-    let mut recomb_sample = vec![0f64; n];       // mean recombinant loci per sample's pairs
+    let mut recomb_sample = vec![0f64; n]; // mean recombinant loci per sample's pairs
     let mut recomb_json = Value::Null;
     if let Some(rc) = recomb {
         let mut sum = vec![0u64; n];
@@ -311,7 +330,8 @@ pub fn write_html_report(
     let file = File::create(file_path)
         .map_err(|e| format!("Failed to create report '{file_path}': {e}"))?;
     let mut w = BufWriter::new(file);
-    w.write_all(html.as_bytes()).map_err(|e| format!("Write error: {e}"))?;
+    w.write_all(html.as_bytes())
+        .map_err(|e| format!("Write error: {e}"))?;
     w.flush().map_err(|e| format!("Flush error: {e}"))?;
     println!("✅ Analyst dashboard written to: {file_path}");
     if truncated {

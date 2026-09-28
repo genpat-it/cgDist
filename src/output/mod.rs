@@ -276,7 +276,8 @@ pub fn write_pairs_long(
         )
         .map_err(|e| format!("Write error: {e}"))?;
         if let (Some(level), Some(d)) = (ci_level, row.distance) {
-            let (dn, lo, hi, reliable) = ci::pair_ci(d, row.h, row.q2, row.shared, total_loci, level);
+            let (dn, lo, hi, reliable) =
+                ci::pair_ci(d, row.h, row.q2, row.shared, total_loci, level);
             write!(writer, "\t{dn:.2}\t{lo:.2}\t{hi:.2}\t{reliable}")
                 .map_err(|e| format!("Write error: {e}"))?;
         } else if ci_level.is_some() {
