@@ -8,16 +8,22 @@ until the API stabilizes).
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-09-28
+
+First release after publication of the cgDist article in *NAR Genomics and
+Bioinformatics* (doi: [10.1093/nargab/lqag090](https://doi.org/10.1093/nargab/lqag090)).
+It adds opt-in per-pair data-quality reporting and an HTML analyst dashboard.
+**The distance algorithms and the default distance-matrix output are unchanged
+from 0.1.2**: all four distance modes (with and without `--min-loci`) and the
+TSV / CSV / PHYLIP / NEXUS outputs were checked byte-identical against 0.1.2
+on a real *L. monocytogenes* dataset (300 samples × 1,748 loci), including runs
+with the new flags enabled.
+
 ### Added
 
 - `--emit-pairs <file>`: long-format per-pair table with data-quality columns
   (`sample_i, sample_j, distance, shared_loci, total_loci, missing_frac`),
   surfacing how many shared loci each distance actually rests on.
-- `--report <file.html>`: a self-contained HTML analyst dashboard (no external
-  assets, works offline) with dataset summary, per-sample data quality, the
-  pairwise-distance distribution, a clusters-vs-threshold curve, and an
-  interactive single-linkage outbreak-clustering explorer.
-
 - `--report-ci` (with `--emit-pairs`, level via `--ci-level`, default 0.95):
   a missingness confidence interval per pair (`dist_norm, ci_low, ci_high,
   ci_reliable`) accounting for the loci a pair does not share. Uses a
@@ -26,11 +32,35 @@ until the API stabilizes).
   validated against a Monte-Carlo posterior predictive. `ci_reliable` is `false`
   in the low-information regime (few differing loci + high missingness), where
   coverage is information-limited regardless of method.
-- Dashboard (`--report`): Nord color theme, and a recombination view (per-pair
-  recombinant-loci load, top recombinant pairs, per-sample load) shown when an
-  enriched cache provides sequence lengths (`--recomb-threshold`, default 3%).
+- `--report <file.html>`: a self-contained HTML analyst dashboard (no external
+  assets, works offline) with dataset summary, per-sample data quality, the
+  pairwise-distance distribution, a clusters-vs-threshold curve, and an
+  interactive single-linkage outbreak-clustering explorer that shows the
+  missingness CI of each edge. Nord color theme.
+- Dashboard recombination view (per-pair recombinant-loci load, top
+  recombinant pairs, per-sample load), shown when an enriched cache provides
+  sequence lengths (`--recomb-threshold`, percent, default 3).
+- Library API: `calculate_pairs_table`, `calculate_pairs_recombination`,
+  `calculate_sample_distance_detailed`, `PairRow`, `write_pairs_long`,
+  `write_html_report`.
 
 All of the above are opt-in and do not change the default distance-matrix output.
+
+### Changed
+
+- cgDist is now described as a distance calculator for core **and whole**
+  genome MLST (cg/wgMLST) in the crate metadata, README and API docs.
+- Citation: README and `CITATION.cff` (`preferred-citation`) now cite the
+  published NAR Genomics and Bioinformatics article (8(3):lqag090) with the
+  full author list; the bioRxiv preprint is still linked.
+
+### Fixed
+
+- `--ci-level` outside (0, 1) (e.g. `95` instead of `0.95`) and
+  `--recomb-threshold` outside (0, 100] are now rejected with a clear error
+  instead of silently producing infinite / meaningless intervals.
+- `--report-ci` without `--emit-pairs` is now an error (it previously had no
+  effect).
 
 ## [0.1.2] — 2026-05-26
 
@@ -135,5 +165,8 @@ on use.
 Initial public release accompanying the bioRxiv preprint
 (DOI: [10.1101/2025.10.16.682749](https://doi.org/10.1101/2025.10.16.682749)).
 
+[Unreleased]: https://github.com/genpat-it/cgDist/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/genpat-it/cgDist/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/genpat-it/cgDist/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/genpat-it/cgDist/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/genpat-it/cgDist/releases/tag/v0.1.0

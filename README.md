@@ -18,6 +18,7 @@ cgDist is a high-performance Rust implementation for calculating genetic distanc
 - **🎯 Precision**: SNP/indel-level distance calculation
 - **🔧 Flexible**: Multiple hashing algorithms (CRC32, MD5, SHA256)
 - **📊 Comprehensive**: Built-in comparison tools and statistical analysis
+- **📋 Per-pair data quality & dashboard**: Optional long-format table of shared loci / missingness per pair, missingness confidence intervals, and a self-contained offline HTML dashboard for outbreak-cluster exploration
 - **🧬 Recombination-candidate flagging**: Per-locus mutation-density screen to flag loci as recombination candidates for downstream phylogenetic confirmation
 - **💾 Efficient**: LZ4 compression for fast caching
 - **📈 Scalable**: Memory-efficient processing of large datasets
@@ -28,6 +29,7 @@ cgDist is a high-performance Rust implementation for calculating genetic distanc
 - [Installation](#-installation)
 - [Quick Start](#-quick-start)
 - [Usage](#-usage)
+- [Per-Pair Quality Table & Analyst Dashboard](#-per-pair-quality-table--analyst-dashboard)
 - [Recombination-Candidate Flagging](#-recombination-candidate-flagging)
 - [Cache Inspector](#-cache-inspector)
 - [Custom Hashers Plugin System](#-custom-hashers-plugin-system)
@@ -102,7 +104,7 @@ notice — existing scripts continue to work.
 To pin a specific published version:
 
 ```bash
-cargo install cgdist --version 0.1.2
+cargo install cgdist --version 0.1.3
 ```
 
 For a fully reproducible build that uses exactly the dependency
@@ -123,7 +125,7 @@ citing the manuscript:
 
 ```bash
 # Specific release tag
-cargo install --git https://github.com/genpat-it/cgDist --tag v0.1.2 cgdist
+cargo install --git https://github.com/genpat-it/cgDist --tag v0.1.3 cgdist
 
 # Latest state on the default branch
 cargo install --git https://github.com/genpat-it/cgDist cgdist
@@ -142,14 +144,14 @@ Container Registry on every release:
 
 ```bash
 # Pull the public image (no authentication required)
-docker pull ghcr.io/genpat-it/cgdist:0.1.2
+docker pull ghcr.io/genpat-it/cgdist:0.1.3
 # or pin to the minor / major series:
 # docker pull ghcr.io/genpat-it/cgdist:0.1
 # docker pull ghcr.io/genpat-it/cgdist:latest   # tracks master HEAD
 
 # Run with the image (mount your working directory at /data).
 # The image's ENTRYPOINT is `cgdist`, so flags are passed directly:
-docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.1.2 \
+docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.1.3 \
     --schema /data/schema_dir --profiles /data/profiles.tsv \
     --output /data/distances.tsv --mode snps-indel-bases
 ```
@@ -312,6 +314,14 @@ PERFORMANCE OPTIONS:
     --hasher-type <TYPE>       Allele hasher type [default: crc32]
                                Options: crc32, sha256, md5, sequence, hamming
 
+REPORTING OPTIONS (opt-in; the distance matrix is unaffected):
+    --emit-pairs <FILE>        Also write a long-format per-pair quality table
+    --report-ci                Add missingness confidence-interval columns to --emit-pairs
+    --ci-level <VAL>           Confidence level for --report-ci, in (0, 1) [default: 0.95]
+    --report <FILE.html>       Also write a self-contained HTML analyst dashboard
+    --recomb-threshold <PCT>   Per-locus mutation density (%) for the dashboard's
+                               recombination view (needs enriched cache) [default: 3.0]
+
 CACHE ENRICHMENT OPTIONS:
     --enrich-lengths           Enrich cache with nucleotide sequence lengths from schema
     --enrich-output <FILE>     Output file for enriched cache [default: overwrites input cache]
@@ -352,6 +362,70 @@ OTHER OPTIONS:
 - **CSV**: Comma-separated distance matrix
 - **PHYLIP**: Phylogenetic analysis format
 - **NEXUS**: Nexus format for phylogenetic tools
+
+Optional extra outputs (see [Per-Pair Quality Table & Analyst Dashboard](#-per-pair-quality-table--analyst-dashboard)):
+`--emit-pairs` (long-format per-pair TSV) and `--report` (self-contained HTML).
+
+## 📋 Per-Pair Quality Table & Analyst Dashboard
+
+A distance between two samples is only as reliable as the number of loci it
+rests on. cgDist can report this alongside the matrix. Both outputs are opt-in
+and computed from the same (cached) per-locus distances, so they add little
+run time and never change the distance matrix.
+
+```bash
+# Distance matrix + per-pair quality table with 95% missingness CI
+# + offline HTML dashboard
+cgdist --schema schema_dir --profiles profiles.tsv --output distances.tsv \
+    --mode snps --cache-file cache.lz4 \
+    --emit-pairs pairs.tsv --report-ci --report report.html
+```
+
+### Per-pair table (`--emit-pairs`)
+
+One row per unordered pair (upper triangle), tab-separated, after three `#`
+header lines (command, timestamp, version):
+
+| Column | Meaning |
+|---|---|
+| `sample_i`, `sample_j` | Sample IDs |
+| `distance` | Same value as in the matrix; `NA` if the pair fails `--min-loci` |
+| `shared_loci` | Loci called in both samples (the distance is computed over these) |
+| `total_loci` | Loci in the analysis after filtering |
+| `missing_frac` | `1 - shared_loci / total_loci` |
+
+With `--report-ci` four columns are added:
+
+| Column | Meaning |
+|---|---|
+| `dist_norm` | Estimated full-schema distance: observed distance + expected contribution of the unshared loci |
+| `ci_low`, `ci_high` | Missingness confidence interval at `--ci-level` (default 0.95) |
+| `ci_reliable` | `false` in the low-information regime (< 10 differing shared loci and `missing_frac` > 0.15), where no method can guarantee coverage |
+
+The interval accounts only for the loci a pair does **not** share: it answers
+"how large could this distance be if the missing loci had been called?" It
+combines an exact Beta-Binomial interval on the number of additional differing
+loci with a normal compound interval, and was validated against a Monte-Carlo
+posterior predictive. When `shared_loci == total_loci` the interval collapses
+to the observed distance.
+
+### HTML dashboard (`--report`)
+
+A single self-contained HTML file (no external assets; works offline and can
+be e-mailed or archived with the analysis) with:
+
+- dataset summary and per-sample data quality (mean shared loci, nearest neighbour);
+- the pairwise-distance distribution and a clusters-vs-threshold curve;
+- an interactive single-linkage clustering explorer at a chosen threshold,
+  showing the missingness CI of each linking edge;
+- a **recombination view** (per-pair and per-sample recombinant-loci load,
+  top pairs) when the cache is enriched with sequence lengths
+  (`--enrich-lengths`); a locus counts as recombinant when its mutation
+  density exceeds `--recomb-threshold` percent (default 3).
+
+> **Memory note:** both outputs hold one record per pair in memory
+> (n·(n−1)/2 pairs), so for very large datasets (tens of thousands of
+> samples) prefer the distance matrix alone or run them on a subset.
 
 ## 🧬 Recombination-Candidate Flagging
 
