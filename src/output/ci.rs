@@ -21,6 +21,8 @@
 // no numeric dependency is added to the published tool.
 
 /// Lanczos approximation of ln Γ(x) for x > 0.
+// Coefficients are kept verbatim from the published tables.
+#[allow(clippy::excessive_precision)]
 fn ln_gamma(x: f64) -> f64 {
     const G: f64 = 7.0;
     const C: [f64; 9] = [
@@ -51,6 +53,7 @@ fn ln_gamma(x: f64) -> f64 {
 }
 
 /// Inverse standard-normal CDF (Acklam's rational approximation), |err| < 1.2e-9.
+#[allow(clippy::excessive_precision)]
 fn normal_ppf(p: f64) -> f64 {
     if p <= 0.0 {
         return f64::NEG_INFINITY;

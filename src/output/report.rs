@@ -222,7 +222,7 @@ pub fn write_html_report(
                 0.0
             };
         }
-        top.sort_by(|a, b| b.2.cmp(&a.2));
+        top.sort_by_key(|t| std::cmp::Reverse(t.2));
         let top_json: Vec<Value> = top
             .iter()
             .take(30)

@@ -60,6 +60,23 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
     // Validate distance mode
     let distance_mode = DistanceMode::from_str(&args.mode)?;
 
+    // Validate reporting options (--report-ci / --ci-level / --recomb-threshold)
+    if !(args.ci_level > 0.0 && args.ci_level < 1.0) {
+        return Err(format!(
+            "--ci-level must be a fraction strictly between 0 and 1 (e.g. 0.95), got {}",
+            args.ci_level
+        ));
+    }
+    if !(args.recomb_threshold > 0.0 && args.recomb_threshold <= 100.0) {
+        return Err(format!(
+            "--recomb-threshold is a percentage and must be in (0, 100], got {}",
+            args.recomb_threshold
+        ));
+    }
+    if args.report_ci && args.emit_pairs.is_none() {
+        return Err("--report-ci requires --emit-pairs <file> (the CI columns are written to the per-pair table)".to_string());
+    }
+
     // Validate and create alignment config (skip for hamming hasher)
     let alignment_config = if args.hasher_type == "hamming" {
         // Hamming hasher doesn't need alignment config
