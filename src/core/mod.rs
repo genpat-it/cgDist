@@ -1,6 +1,7 @@
 // mod.rs - Core logic module
 
 pub mod alignment;
+pub mod banded;
 pub mod distance;
 // pub mod recombination; // Disabled - pluggable system not needed for now
 

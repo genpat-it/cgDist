@@ -141,6 +141,12 @@ pub struct Args {
     #[argh(option)]
     pub save_alignments: Option<String>,
 
+    /// re-check this fraction (0-1) of new alignments against parasail's
+    /// original kernel and stop with an error on any difference; the pairs
+    /// are chosen deterministically (default: 0 = off, 1 = all)
+    #[argh(option, default = "0.0")]
+    pub verify_alignments: f64,
+
     /// alignment mode: dna, dna-strict, dna-permissive, custom (default: dna)
     #[argh(option, default = "String::from(\"dna\")")]
     pub alignment_mode: String,

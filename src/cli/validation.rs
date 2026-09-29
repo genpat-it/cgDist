@@ -60,6 +60,13 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
     // Validate distance mode
     let distance_mode = DistanceMode::from_str(&args.mode)?;
 
+    if !(0.0..=1.0).contains(&args.verify_alignments) {
+        return Err(format!(
+            "--verify-alignments is a fraction between 0 and 1, got {}",
+            args.verify_alignments
+        ));
+    }
+
     // Validate reporting options (--report-ci / --ci-level / --recomb-threshold)
     if !(args.ci_level > 0.0 && args.ci_level < 1.0) {
         return Err(format!(

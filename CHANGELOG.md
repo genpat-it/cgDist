@@ -8,6 +8,28 @@ until the API stabilizes).
 
 ## [Unreleased]
 
+### Changed
+
+- Alignments are much faster with bit-identical results. A pair is first
+  aligned with a certified banded aligner (`src/core/banded.rs`): it fills
+  only a diagonal band of the DP matrix, reproduces parasail's recurrences,
+  tie-breaking and traceback, and returns a result only when a band
+  certificate proves it equals the full-matrix result. Otherwise the pair is
+  aligned by parasail as before, now with the scan kernel at 16-bit
+  precision (escalating to 32/64-bit on saturation) and per-thread aligners
+  instead of the slower striped kernel. The proof, the invariants and the
+  verification (exhaustive over all short sequences, 739,554 real allele
+  pairs, adversarial fuzzing: no differences) are in
+  `docs/BANDED_ALIGNMENT_PROOF.md`. Cold runs (16 threads): 72 s -> 3.8 s
+  (L. monocytogenes, 300 samples), 153 s -> 11 s (S. enterica, 120
+  samples), with distance matrices and cache contents identical to 0.1.4.
+
+### Added
+
+- `--verify-alignments <fraction>`: re-check a deterministic fraction of new
+  alignments against parasail's original kernel and stop with an error on
+  any difference (`1` = every pair).
+
 ## [0.1.4] — 2026-09-29
 
 Bug-fix release. Two cache bugs, both present since 0.1.0, are fixed.

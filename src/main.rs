@@ -321,6 +321,14 @@ fn run_main() -> Result<(), String> {
     }
 
     // Set alignment saving if requested
+    if args.verify_alignments > 0.0 {
+        engine.set_verify_fraction(args.verify_alignments);
+        println!(
+            "🔎 Verifying {:.1}% of new alignments against parasail's original kernel",
+            args.verify_alignments * 100.0
+        );
+    }
+
     if let Some(ref save_path) = args.save_alignments {
         engine.set_save_alignments(save_path.clone());
         println!("💾 Alignment details will be saved to: {save_path}");

@@ -1,6 +1,7 @@
 // distance.rs - Core distance calculation engine
 
 use crate::core::alignment::{compute_alignment_stats, AlignmentConfig, DistanceMode};
+use crate::core::banded::{align_certified, Scoring};
 use crate::data::{AllelicProfile, SequenceDatabase};
 use crate::hashers::{AlleleHasher, HasherRegistry};
 use chrono;
@@ -34,6 +35,8 @@ pub struct DistanceEngine {
     has_new_entries: bool,
     // For saving detailed alignments
     save_alignments_path: Option<String>,
+    // Fraction of new alignments re-checked against parasail's original kernel
+    verify_fraction: f64,
     alignment_details: Vec<String>, // TSV lines to write
 }
 
@@ -161,6 +164,40 @@ fn align_global_trace(
     }
 }
 
+/// Deterministic choice of the pairs re-checked by --verify-alignments:
+/// depends only on the two allele hashes, not on threads or run order.
+fn verify_selected(crc1: u32, crc2: u32, fraction: f64) -> bool {
+    if fraction >= 1.0 {
+        return true;
+    }
+    let (a, b) = (crc1.min(crc2) as u64, crc1.max(crc2) as u64);
+    let mut h = (a << 32 | b).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    h ^= h >> 29;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^= h >> 32;
+    ((h >> 11) as f64 / (1u64 << 53) as f64) < fraction
+}
+
+/// Statistics from parasail's original production kernel (striped,
+/// saturating 8/16/32-bit), the reference for --verify-alignments.
+fn reference_alignment_stats(
+    config: &AlignmentConfig,
+    query: &[u8],
+    reference: &[u8],
+) -> Option<(usize, usize, usize)> {
+    let matrix = Matrix::create(b"ACGT", config.match_score, config.mismatch_penalty).ok()?;
+    let aligner = Aligner::new()
+        .matrix(matrix)
+        .gap_open(config.gap_open)
+        .gap_extend(config.gap_extend)
+        .global()
+        .use_trace()
+        .build();
+    let res = aligner.align(Some(query), reference).ok()?;
+    let tb = res.get_traceback_strings(query, reference).ok()?;
+    Some(compute_alignment_stats(&tb.query, &tb.reference))
+}
+
 /// True for cache files written by a cgdist older than 0.1.4, the first
 /// release that no longer stores placeholder statistics in Hamming mode.
 fn written_before_hamming_fix(version: &str) -> bool {
@@ -198,6 +235,7 @@ impl DistanceEngine {
             cache_note: None,
             has_new_entries: false,
             save_alignments_path: None,
+            verify_fraction: 0.0,
             alignment_details: Vec::new(),
         }
     }
@@ -215,6 +253,7 @@ impl DistanceEngine {
             cache_note: None,
             has_new_entries: false,
             save_alignments_path: None,
+            verify_fraction: 0.0,
             alignment_details: Vec::new(),
         }
     }
@@ -916,6 +955,41 @@ impl DistanceEngine {
         crc1: u32,
         crc2: u32,
     ) -> Option<(usize, usize, usize, Option<String>)> {
+        let result = self.compute_single_alignment_inner(locus, crc1, crc2);
+        if self.verify_fraction > 0.0
+            && crc1 != crc2
+            && verify_selected(crc1, crc2, self.verify_fraction)
+        {
+            if let (Some((snps, ev, bases, _)), Some(db)) = (&result, &self.sequence_db) {
+                if let (Some(s1), Some(s2)) =
+                    (db.get_sequence(locus, crc1), db.get_sequence(locus, crc2))
+                {
+                    if let Some(want) =
+                        reference_alignment_stats(&self.config, &s1.sequence, &s2.sequence)
+                    {
+                        if want != (*snps, *ev, *bases) {
+                            panic!(
+                                "alignment verification FAILED for locus {locus}, alleles {crc1}/{crc2}: \
+                                 cgdist computed (snps, indel_events, indel_bases) = {:?}, parasail's \
+                                 original kernel gives {:?}. Please report this at \
+                                 https://github.com/genpat-it/cgDist/issues",
+                                (*snps, *ev, *bases),
+                                want
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    fn compute_single_alignment_inner(
+        &self,
+        locus: &str,
+        crc1: u32,
+        crc2: u32,
+    ) -> Option<(usize, usize, usize, Option<String>)> {
         if crc1 == crc2 {
             return Some((0, 0, 0, None)); // Identical alleles
         }
@@ -926,6 +1000,27 @@ impl DistanceEngine {
                 seq_db.get_sequence(locus, crc1),
                 seq_db.get_sequence(locus, crc2),
             ) {
+                // Fast path: certified banded alignment, bit-identical to
+                // parasail (see core::banded). It yields statistics only, so
+                // --save-alignments keeps the parasail path. Sequences with a
+                // NUL byte are left to parasail too, whose C-string handling
+                // makes them fail over to analyze_sequences.
+                if self.save_alignments_path.is_none()
+                    && !seq1.sequence.contains(&0)
+                    && !seq2.sequence.contains(&0)
+                {
+                    let scoring = Scoring {
+                        match_score: self.config.match_score,
+                        mismatch: self.config.mismatch_penalty,
+                        gap_open: self.config.gap_open,
+                        gap_extend: self.config.gap_extend,
+                    };
+                    if let Some(b) = align_certified(&seq1.sequence, &seq2.sequence, &scoring, 0.5)
+                    {
+                        return Some((b.snps, b.indel_events, b.indel_bases, None));
+                    }
+                }
+
                 // None only if the scoring matrix cannot be created
                 let aligned = align_global_trace(&self.config, &seq1.sequence, &seq2.sequence)?;
 
@@ -1278,6 +1373,13 @@ impl DistanceEngine {
     }
 
     /// Set path for saving detailed alignments
+    /// Re-check a deterministic fraction of new alignments against parasail's
+    /// original production kernel (striped, saturating); any difference
+    /// aborts the run.
+    pub fn set_verify_fraction(&mut self, fraction: f64) {
+        self.verify_fraction = fraction.clamp(0.0, 1.0);
+    }
+
     pub fn set_save_alignments(&mut self, path: String) {
         self.save_alignments_path = Some(path);
         // Initialize with TSV header
@@ -1765,6 +1867,37 @@ mod tests {
             )
         };
         assert_eq!(stats(32), stats(64));
+    }
+
+    #[test]
+    fn verify_selection_is_deterministic_and_proportional() {
+        let mut hits = 0;
+        for i in 0..20_000u32 {
+            let (a, b) = (i.wrapping_mul(2654435761), i ^ 0xDEADBEEF);
+            let x = verify_selected(a, b, 0.1);
+            assert_eq!(x, verify_selected(b, a, 0.1)); // order-independent
+            assert_eq!(x, verify_selected(a, b, 0.1)); // repeatable
+            hits += x as usize;
+            assert!(verify_selected(a, b, 1.0));
+            assert!(!verify_selected(a, b, 0.0));
+        }
+        assert!(
+            (1600..2400).contains(&hits),
+            "selected {hits} of 20000 at 10%"
+        );
+    }
+
+    #[test]
+    fn verification_accepts_correct_alignments() {
+        let (mut e, c) = engine_with(&[A, B]);
+        e.set_verify_fraction(1.0);
+        e.precompute_alignments(&pairs(&c), DistanceMode::SnpsOnly);
+        assert_eq!(
+            e.get_distance("L1", c[0], c[1], DistanceMode::SnpsOnly, true),
+            2
+        );
+        let want = reference_alignment_stats(&AlignmentConfig::default(), A, B);
+        assert_eq!(want, Some((2, 0, 0)));
     }
 
     #[test]

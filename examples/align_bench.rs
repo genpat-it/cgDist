@@ -17,6 +17,7 @@ struct Pair {
     q: Vec<u8>,
     r: Vec<u8>,
     gold: (usize, usize, usize),
+    score: i32,
 }
 
 const MATCH: i32 = 2;
@@ -129,6 +130,55 @@ fn variant(name: &str, p: &Pair) -> (usize, usize, usize) {
     })
 }
 
+const SC: cgdist::core::banded::Scoring = cgdist::core::banded::Scoring {
+    match_score: MATCH,
+    mismatch: MISMATCH,
+    gap_open: GAP_OPEN,
+    gap_extend: GAP_EXTEND,
+};
+
+/// Banded result, or None when the band could not be certified.
+fn banded(p: &Pair) -> Option<((usize, usize, usize), i32)> {
+    cgdist::core::banded::align_certified(&p.q, &p.r, &SC, 0.5)
+        .map(|b| ((b.snps, b.indel_events, b.indel_bases), b.score))
+}
+
+type BandedOut = Option<((usize, usize, usize), i32)>;
+
+fn run_banded(pairs: &[Pair], tp: &[Pair], base: f64) {
+    let t = Instant::now();
+    for p in tp {
+        std::hint::black_box(banded(p));
+    }
+    let el = t.elapsed().as_secs_f64();
+    let res: Vec<(usize, BandedOut)> = pairs
+        .par_iter()
+        .enumerate()
+        .map(|(i, p)| (i, banded(p)))
+        .collect();
+    let uncertified = res.iter().filter(|(_, r)| r.is_none()).count();
+    let wrong: Vec<usize> = res
+        .iter()
+        .filter(
+            |(i, r)| matches!(r, Some((st, sc)) if *st != pairs[*i].gold || *sc != pairs[*i].score),
+        )
+        .map(|(i, _)| *i)
+        .collect();
+    let tp_unc = 0usize;
+    println!(
+        "{:<18} {:>9.1} us/pair  {:>4.2}x  WRONG {}/{}  uncertified {} ({:.2}%; {} in timing set){}",
+        "banded",
+        el / tp.len() as f64 * 1e6,
+        base / el,
+        wrong.len(),
+        pairs.len(),
+        uncertified,
+        uncertified as f64 / pairs.len() as f64 * 100.0,
+        tp_unc,
+        if wrong.is_empty() { String::new() } else { format!("  first wrong at {:?}", &wrong[..wrong.len().min(5)]) }
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let path = &args[1];
@@ -153,6 +203,7 @@ fn main() {
                     c[4].parse().unwrap(),
                     c[5].parse().unwrap(),
                 ),
+                score: c[6].parse::<f64>().unwrap() as i32,
             }
         })
         .collect();
@@ -186,6 +237,10 @@ fn main() {
         .collect(),
     };
     for name in names.iter().map(String::as_str) {
+        if name == "banded" {
+            run_banded(&pairs, tp, base);
+            continue;
+        }
         let t = Instant::now();
         for p in tp {
             std::hint::black_box(variant(name, p));
