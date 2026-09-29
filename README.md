@@ -621,6 +621,9 @@ cgdist-cache pull --from https://host/lm_dna.cgpack --out ~/.cache/cgdist/lm --p
 
 cgdist-cache info   --store lm_dna.cgpack    # parameters, loci, pairs, size
 cgdist-cache verify --store lm_dna.cgpack    # checksums and decoding of every locus
+cgdist-cache verify --store lm_dna.cgpack --schema schema_dir/ --realign 0.01
+                                             # + recompute 1% of the pairs from the schema
+cgdist-cache stats  --store lm_dna.cgpack --out stats.json   # per-locus summaries, histograms
 cgdist-cache import --cache cache.lz4 --out lm_store   # convert a cgdist cache
 ```
 
@@ -639,6 +642,30 @@ cgdist-cache import --cache cache.lz4 --out lm_store   # convert a cgdist cache
   skipped, so repeating a pull updates the store.
 * A store is used only if its hasher and alignment parameters match the
   run; coding counts are used only if the genetic code matches.
+
+### Protein stores
+
+The same format holds protein-level results for the `aa-*` modes and
+`aa_*` weights. The allele table lists the distinct proteins of each locus
+(protein hash and amino-acid length) and the pair columns hold amino-acid
+substitutions, InDel events and InDel residues. The manifest records the
+genetic code, substitution matrix and gap penalties, which must match the
+run.
+
+```bash
+cgdist-cache build --protein --schema schema_dir/ --out lm_prot --threads 64 \
+    [--aa-matrix blosum62 --aa-gap-open 11 --aa-gap-extend 1 --translation-table 11]
+cgdist ... --mode aa-substitutions --protein-cache-layer lm_prot     # read-only
+cgdist ... --mode aa-substitutions --protein-cache-dir my_prot       # read/write
+```
+
+Proteins are translated from the run's schema, so novel alleles are
+translated too and only protein pairs missing from the stores are aligned.
+The protein length stored for each hash must equal the translated length,
+otherwise the store is refused (protein-hash collision or different
+sequences). For the whole L. monocytogenes schema, the 17,821,184 pairs of
+distinct proteins took 116 s on 24 threads and 14 MB. A DNA store is never
+accepted as a protein store, and a protein store never as a DNA store.
 
 ## 🧬 Recombination-Candidate Flagging
 

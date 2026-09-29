@@ -66,6 +66,8 @@ pub struct Config {
     pub aa_gap_open: Option<i32>,
     pub aa_gap_extend: Option<i32>,
     pub protein_cache_file: Option<String>,
+    pub protein_cache_dir: Option<String>,
+    pub protein_cache_layer: Option<Vec<String>>,
 }
 
 impl Config {
@@ -115,6 +117,8 @@ impl Config {
             aa_gap_open: None,
             aa_gap_extend: None,
             protein_cache_file: None,
+            protein_cache_dir: None,
+            protein_cache_layer: None,
         }
     }
 
@@ -296,6 +300,8 @@ dry_run = false
 # aa_gap_open = 11
 # aa_gap_extend = 1
 # protein_cache_file = "prot.lz4"
+# protein_cache_dir = "my_protein_store"
+# protein_cache_layer = ["lm_blosum62.cgpack"]
 "#
         .to_string()
     }

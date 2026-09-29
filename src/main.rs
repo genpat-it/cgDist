@@ -471,7 +471,9 @@ fn run_main() -> Result<(), String> {
 
     // Write the pairs aligned in this run to the cache store
     if let (Some(dir), true) = (&args.cache_dir, args.hasher_type != "hamming") {
-        let params = cgdist::store::AlignmentParams::from(engine.alignment_config());
+        let params = cgdist::store::StoreParams::Dna(cgdist::store::AlignmentParams::from(
+            engine.alignment_config(),
+        ));
         let saved = cgdist::store::Store::open_or_create(
             std::path::Path::new(dir),
             &args.hasher_type,
@@ -512,9 +514,53 @@ fn run_main() -> Result<(), String> {
             }
         }
         engine.set_protein_store(store);
-        if let Err(e) = engine.precompute_proteins(&unique_pairs) {
+        // protein cache stores: the writable --protein-cache-dir (if it
+        // exists) and the read-only layers
+        let mut sources: Vec<cgdist::store::remote::Source> = Vec::new();
+        if !args.force_recompute {
+            if let Some(dir) = &args.protein_cache_dir {
+                if std::path::Path::new(dir)
+                    .join(cgdist::store::MANIFEST_FILE)
+                    .exists()
+                {
+                    sources.push(cgdist::store::remote::Source::parse(dir));
+                }
+            }
+            sources.extend(
+                args.protein_cache_layer
+                    .iter()
+                    .map(|s| cgdist::store::remote::Source::parse(s)),
+            );
+        }
+        if let Err(e) = engine.precompute_proteins(&unique_pairs, &sources) {
             eprintln!("❌ ERROR: {e}");
             std::process::exit(1);
+        }
+        if let Some(dir) = &args.protein_cache_dir {
+            let settings = validation_result.protein.clone().unwrap();
+            let saved = cgdist::store::Store::open_or_create(
+                std::path::Path::new(dir),
+                "crc32",
+                cgdist::store::StoreParams::Protein(settings),
+            )
+            .and_then(|mut st| {
+                let _lock = st.lock()?;
+                engine
+                    .protein_store_mut()
+                    .map_or(Ok((0, 0)), |p| p.save_to_store(&mut st))
+            });
+            match saved {
+                Ok((0, _)) => println!("📌 Protein cache store unchanged"),
+                Ok((loci, pairs)) => {
+                    println!(
+                        "💾 Protein cache store {dir}: {pairs} new protein pairs in {loci} loci"
+                    )
+                }
+                Err(e) => {
+                    eprintln!("❌ ERROR writing protein cache store {dir}: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
         if let (Some(pc), Some(store)) = (&args.protein_cache_file, engine.protein_store()) {
             if store.has_new_entries() {

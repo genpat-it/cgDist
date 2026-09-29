@@ -12,8 +12,15 @@
 // pair, and values are written column-wise as varints before LZ4 compression.
 // A store is only valid for one set of alignment parameters and one hasher;
 // both are checked before any entry is used.
+//
+// A protein store has the same layout: its allele table holds protein hashes
+// (CRC32 of the translated allele, terminal stop removed) and amino-acid
+// lengths, and its pair columns hold amino-acid substitutions / InDel events
+// / InDel residues. Its manifest records the protein settings (genetic code,
+// substitution matrix, gap penalties) instead of DNA alignment parameters.
 
 use crate::core::alignment::AlignmentConfig;
+use crate::core::protein_distance::ProteinSettings;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -60,6 +67,27 @@ impl std::fmt::Display for AlignmentParams {
             "match={}, mismatch={}, gap_open={}, gap_extend={}",
             self.match_score, self.mismatch_penalty, self.gap_open, self.gap_extend
         )
+    }
+}
+
+/// What the pairs of a store were computed with: DNA alignment parameters,
+/// or protein-level settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreParams {
+    Dna(AlignmentParams),
+    Protein(ProteinSettings),
+}
+
+impl std::fmt::Display for StoreParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StoreParams::Dna(p) => write!(f, "DNA {p}"),
+            StoreParams::Protein(p) => write!(
+                f,
+                "protein: translation table {}, first codon as Met: {}, matrix {}, gap_open={}, gap_extend={}",
+                p.translation_table, p.first_codon_as_met, p.matrix, p.gap_open, p.gap_extend
+            ),
+        }
     }
 }
 
@@ -375,7 +403,12 @@ pub struct Manifest {
     pub format: String,
     pub format_version: u32,
     pub hasher: String,
-    pub alignment: AlignmentParams,
+    /// DNA alignment parameters (DNA stores)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<AlignmentParams>,
+    /// protein-level settings (protein stores)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protein: Option<ProteinSettings>,
     #[serde(default)]
     pub schema: SchemaInfo,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -390,13 +423,18 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn new(hasher: &str, alignment: AlignmentParams) -> Self {
+    pub fn new(hasher: &str, params: StoreParams) -> Self {
         let now = now();
+        let (alignment, protein) = match params {
+            StoreParams::Dna(a) => (Some(a), None),
+            StoreParams::Protein(p) => (None, Some(p)),
+        };
         Self {
             format: STORE_FORMAT.to_string(),
             format_version: STORE_FORMAT_VERSION,
             hasher: hasher.to_string(),
             alignment,
+            protein,
             schema: SchemaInfo::default(),
             note: None,
             genetic_code: None,
@@ -419,6 +457,10 @@ impl Manifest {
                 m.format_version, STORE_FORMAT_VERSION
             ));
         }
+        m.params()?;
+        if m.protein.is_some() && m.genetic_code.is_some() {
+            return Err("invalid store manifest: a protein store has no coding counts".into());
+        }
         for (locus, e) in &m.loci {
             if e.file != locus_file_name(locus)? {
                 return Err(format!(
@@ -430,22 +472,50 @@ impl Manifest {
         Ok(m)
     }
 
+    /// What the pairs were computed with (exactly one of `alignment` and
+    /// `protein` is set).
+    pub fn params(&self) -> Result<StoreParams, String> {
+        match (&self.alignment, &self.protein) {
+            (Some(a), None) => Ok(StoreParams::Dna(*a)),
+            (None, Some(p)) => Ok(StoreParams::Protein(p.clone())),
+            _ => Err(
+                "invalid store manifest: exactly one of 'alignment' (DNA store) and 'protein' \
+                 (protein store) must be present"
+                    .into(),
+            ),
+        }
+    }
+
+    pub fn is_protein(&self) -> bool {
+        self.protein.is_some()
+    }
+
     /// Refuse to mix alignment results computed under different settings.
-    pub fn check_compatible(&self, hasher: &str, params: &AlignmentParams) -> Result<(), String> {
+    pub fn check_compatible(&self, hasher: &str, params: &StoreParams) -> Result<(), String> {
         if self.hasher != hasher {
             return Err(format!(
                 "cache store uses hasher '{}', this run uses '{hasher}'",
                 self.hasher
             ));
         }
-        if &self.alignment != params {
-            return Err(format!(
-                "cache store alignment parameters differ:\n  store: {}\n  run:   {params}\n  \
-                 results computed with different parameters cannot be mixed",
-                self.alignment
-            ));
+        let mine = self.params()?;
+        match (&mine, params) {
+            (StoreParams::Protein(_), StoreParams::Dna(_)) => {
+                Err("this is a protein store (amino-acid results): use it with \
+                 --protein-cache-layer / --protein-cache-dir, not as a DNA cache store"
+                    .into())
+            }
+            (StoreParams::Dna(_), StoreParams::Protein(_)) => Err(
+                "this is a DNA store: use it with --cache-layer / --cache-dir, not as a \
+                 protein store"
+                    .into(),
+            ),
+            _ if &mine != params => Err(format!(
+                "cache store parameters differ:\n  store: {mine}\n  run:   {params}\n  \
+                 results computed with different parameters cannot be mixed"
+            )),
+            _ => Ok(()),
         }
-        Ok(())
     }
 }
 
@@ -504,7 +574,7 @@ impl Store {
         })
     }
 
-    pub fn create(root: &Path, hasher: &str, params: AlignmentParams) -> Result<Self, String> {
+    pub fn create(root: &Path, hasher: &str, params: StoreParams) -> Result<Self, String> {
         fs::create_dir_all(root.join(LOCI_DIR))
             .map_err(|e| format!("cannot create cache store {}: {e}", root.display()))?;
         let mut store = Self {
@@ -516,11 +586,7 @@ impl Store {
     }
 
     /// Open an existing store (checking compatibility) or create an empty one.
-    pub fn open_or_create(
-        root: &Path,
-        hasher: &str,
-        params: AlignmentParams,
-    ) -> Result<Self, String> {
+    pub fn open_or_create(root: &Path, hasher: &str, params: StoreParams) -> Result<Self, String> {
         if root.join(MANIFEST_FILE).exists() {
             let store = Self::open(root)?;
             store.manifest.check_compatible(hasher, &params)?;
@@ -799,8 +865,8 @@ mod tests {
     fn store_write_read_verify_and_compat() {
         let dir = std::env::temp_dir().join(format!("cgdist_store_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let params = AlignmentParams::from(&AlignmentConfig::default());
-        let mut st = Store::create(&dir, "crc32", params).unwrap();
+        let params = StoreParams::Dna(AlignmentParams::from(&AlignmentConfig::default()));
+        let mut st = Store::create(&dir, "crc32", params.clone()).unwrap();
         st.write_locus("L1", &sample()).unwrap();
         st.save_manifest().unwrap();
 
@@ -809,10 +875,10 @@ mod tests {
         assert!(st2.read_locus("missing").unwrap().is_none());
         assert!(st2.verify().is_empty());
         assert!(st2.manifest.check_compatible("crc32", &params).is_ok());
-        let other = AlignmentParams {
+        let other = StoreParams::Dna(AlignmentParams {
             gap_open: 8,
-            ..params
-        };
+            ..AlignmentParams::from(&AlignmentConfig::default())
+        });
         assert!(st2.manifest.check_compatible("crc32", &other).is_err());
         assert!(st2.manifest.check_compatible("sha256", &params).is_err());
 
@@ -820,8 +886,17 @@ mod tests {
         let dna = AlignmentConfig::from_mode("dna").unwrap();
         assert!(st2
             .manifest
-            .check_compatible("crc32", &AlignmentParams::from(&dna))
+            .check_compatible("crc32", &StoreParams::Dna(AlignmentParams::from(&dna)))
             .is_ok());
+        // a DNA store is never used as a protein store
+        let prot = StoreParams::Protein(ProteinSettings {
+            translation_table: 11,
+            first_codon_as_met: true,
+            matrix: "blosum62".into(),
+            gap_open: 11,
+            gap_extend: 1,
+        });
+        assert!(st2.manifest.check_compatible("crc32", &prot).is_err());
 
         // tampering is detected
         let f = dir.join(locus_file_name("L1").unwrap());

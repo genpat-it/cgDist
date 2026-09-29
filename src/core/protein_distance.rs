@@ -9,9 +9,10 @@
 // residues are counted exactly as the DNA statistics are
 // (compute_alignment_stats on the gapped protein strings).
 //
-// Results live in a separate protein cache (--protein-cache-file): its
+// Results live in a separate protein cache (--protein-cache-file) or protein
+// cache store (--protein-cache-dir / --protein-cache-layer, see store/): their
 // values depend on the genetic code, matrix and gap penalties, which are
-// recorded in its metadata and must match to be reused.
+// recorded in the metadata and must match to be reused.
 
 use crate::core::alignment::compute_alignment_stats;
 use crate::core::protein::GeneticCode;
@@ -53,6 +54,15 @@ impl ProteinSettings {
     }
 
     /// Check that the settings are usable (matrix exists, penalties valid).
+    /// Built-in matrix names are case-insensitive: store them lower-case so
+    /// that "BLOSUM62" and "blosum62" are the same setting.
+    pub fn normalized(mut self) -> Self {
+        if !std::path::Path::new(&self.matrix).is_file() {
+            self.matrix = self.matrix.to_lowercase();
+        }
+        self
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.code()?;
         self.load_matrix()?;
@@ -82,7 +92,8 @@ pub fn protein_of(code: &GeneticCode, cds: &[u8]) -> Vec<u8> {
     p
 }
 
-fn protein_hash(p: &[u8]) -> u32 {
+/// Protein hash: CRC32 of the amino-acid sequence (see `protein_of`).
+pub fn protein_hash(p: &[u8]) -> u32 {
     let mut h = crc32fast::Hasher::new();
     h.update(p);
     h.finalize()
@@ -209,6 +220,10 @@ pub struct ProteinStore {
     /// (locus, lo, hi) -> statistics, lo < hi protein hashes
     pairs: HashMap<(String, u32, u32), ProteinPair>,
     has_new: bool,
+    /// protein pairs aligned in this run (not yet written to a store)
+    new_keys: HashSet<(String, u32, u32)>,
+    /// (locus, protein hash) -> amino-acid length, for proteins of this run
+    lens: HashMap<(String, u32), u32>,
     /// allele pairs (locus, dna lo, dna hi) whose protein is unknown (no
     /// sequence in the schema)
     pub unknown_alleles: usize,
@@ -224,6 +239,8 @@ impl ProteinStore {
             map: HashMap::new(),
             pairs: HashMap::new(),
             has_new: false,
+            new_keys: HashSet::new(),
+            lens: HashMap::new(),
             unknown_alleles: 0,
         })
     }
@@ -307,6 +324,7 @@ impl ProteinStore {
         &mut self,
         seq_db: &SequenceDatabase,
         dna_pairs: &HashSet<(String, u32, u32)>,
+        sources: &[crate::store::remote::Source],
     ) -> Result<(), String> {
         // 1. proteins of all alleles involved
         let mut alleles: HashSet<(&str, u32)> = HashSet::new();
@@ -335,7 +353,24 @@ impl ProteinStore {
             }
             self.map.insert((locus.to_string(), crc), h);
         }
-        // 2. distinct protein pairs not in the cache
+        for ((l, h), p) in &protein_seq {
+            self.lens.insert((l.clone(), *h), p.len() as u32);
+        }
+        // 2. pairs from protein cache stores (read-only layers first to last)
+        if !sources.is_empty() {
+            let mut needed: HashMap<String, HashSet<u32>> = HashMap::new();
+            for (l, h) in protein_seq.keys() {
+                needed.entry(l.clone()).or_default().insert(*h);
+            }
+            for src in sources {
+                let n = self.load_from_source(src, &needed)?;
+                println!(
+                    "📂 Protein cache store {}: {n} protein pairs for this run",
+                    src.describe()
+                );
+            }
+        }
+        // 3. distinct protein pairs not in the cache
         let mut todo: HashSet<(String, u32, u32)> = HashSet::new();
         self.unknown_alleles = 0;
         for (l, a, b) in dna_pairs {
@@ -375,6 +410,7 @@ impl ProteinStore {
             .collect();
         for (k, r) in results {
             if let Some(r) = r {
+                self.new_keys.insert(k.clone());
                 self.pairs.insert(k, r);
                 self.has_new = true;
             }
@@ -389,6 +425,124 @@ impl ProteinStore {
         Ok(())
     }
 
+    /// Load, from a protein cache store, the pairs among the proteins of
+    /// this run (`needed`: locus -> protein hashes). The store's amino-acid
+    /// length of every protein must equal the length translated here: a
+    /// difference means a protein-hash collision or a store built from other
+    /// sequences, and is an error. Returns the number of pairs added.
+    pub fn load_from_source(
+        &mut self,
+        source: &crate::store::remote::Source,
+        needed: &HashMap<String, HashSet<u32>>,
+    ) -> Result<usize, String> {
+        let manifest = source.manifest()?;
+        manifest.check_compatible(
+            "crc32",
+            &crate::store::StoreParams::Protein(self.settings.clone()),
+        )?;
+        let loci: Vec<(&String, &crate::store::LocusEntry)> = needed
+            .keys()
+            .filter_map(|l| manifest.loci.get_key_value(l))
+            .collect();
+        let blobs: Vec<(String, Vec<u8>)> = loci
+            .par_iter()
+            .map(|(l, e)| source.locus_bytes(e).map(|b| ((*l).clone(), b)))
+            .collect::<Result<_, _>>()?;
+        let mut added = 0usize;
+        for (locus, bytes) in blobs {
+            let want = &needed[&locus];
+            let mut store_len: HashMap<u32, u32> = HashMap::new();
+            let mut rows: Vec<(u32, u32, crate::store::PairStats)> = Vec::new();
+            crate::store::decode_with(
+                &bytes,
+                |alleles| {
+                    for &(h, l) in alleles {
+                        if want.contains(&h) {
+                            store_len.insert(h, l);
+                        }
+                    }
+                },
+                |a, b, st| {
+                    if want.contains(&a) && want.contains(&b) {
+                        rows.push((a, b, st));
+                    }
+                },
+            )
+            .map_err(|e| format!("locus {locus}: {e}"))?;
+            for (h, l) in &store_len {
+                let mine = self.lens.get(&(locus.clone(), *h)).copied();
+                if *l > 0 && mine.is_some_and(|m| m != *l) {
+                    return Err(format!(
+                        "protein store {}: locus {locus}, protein {h} has {l} residues in the store \
+                         but {} here (protein-hash collision or different sequences); \
+                         refusing to use it",
+                        source.describe(),
+                        mine.unwrap()
+                    ));
+                }
+            }
+            for (a, b, st) in rows {
+                let key = (locus.clone(), a, b);
+                if self.pairs.contains_key(&key) {
+                    continue;
+                }
+                let len = |h: u32| {
+                    store_len
+                        .get(&h)
+                        .copied()
+                        .filter(|&l| l > 0)
+                        .or_else(|| self.lens.get(&(locus.clone(), h)).copied())
+                        .unwrap_or(0)
+                };
+                let pair = ProteinPair {
+                    aa_subs: st.snps,
+                    aa_indel_events: st.indel_events,
+                    aa_indel_residues: st.indel_bases,
+                    aa_length1: len(a),
+                    aa_length2: len(b),
+                };
+                self.pairs.insert(key, pair);
+                added += 1;
+            }
+        }
+        Ok(added)
+    }
+
+    /// Write the protein pairs aligned in this run to a (writable, locked)
+    /// protein cache store, merged with what it holds for those loci.
+    /// Returns (loci written, pairs added).
+    pub fn save_to_store(
+        &mut self,
+        store: &mut crate::store::Store,
+    ) -> Result<(usize, usize), String> {
+        store.manifest.check_compatible(
+            "crc32",
+            &crate::store::StoreParams::Protein(self.settings.clone()),
+        )?;
+        if self.new_keys.is_empty() {
+            return Ok((0, 0));
+        }
+        let mut by_locus: BTreeMap<&str, Vec<&(String, u32, u32)>> = BTreeMap::new();
+        for k in &self.new_keys {
+            by_locus.entry(k.0.as_str()).or_default().push(k);
+        }
+        let (n_loci, mut pairs) = (by_locus.len(), 0usize);
+        for (locus, keys) in by_locus {
+            let mut data = store.read_locus(locus)?.unwrap_or_default();
+            for k in keys {
+                let Some(p) = self.pairs.get(k) else { continue };
+                data.insert_pair(k.1, k.2, pair_stats(p));
+                data.set_allele_len(k.1, p.aa_length1);
+                data.set_allele_len(k.2, p.aa_length2);
+                pairs += 1;
+            }
+            store.write_locus(locus, &data)?;
+        }
+        store.save_manifest()?;
+        self.new_keys.clear();
+        Ok((n_loci, pairs))
+    }
+
     /// Protein-level view of a DNA allele pair: None if a protein is
     /// unknown; Some(None) if both alleles encode the same protein; else the
     /// pair statistics.
@@ -401,6 +555,16 @@ impl ProteinStore {
         self.pairs
             .get(&(locus.to_string(), pa.min(pb), pa.max(pb)))
             .map(Some)
+    }
+}
+
+/// Store representation of a protein pair (substitutions in the SNP column).
+pub fn pair_stats(p: &ProteinPair) -> crate::store::PairStats {
+    crate::store::PairStats {
+        snps: p.aa_subs,
+        indel_events: p.aa_indel_events,
+        indel_bases: p.aa_indel_residues,
+        coding: None,
     }
 }
 

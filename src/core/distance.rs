@@ -410,7 +410,7 @@ pub fn align_pair_with_strings(
 
 /// Deterministic choice of the pairs re-checked by --verify-alignments:
 /// depends only on the two allele hashes, not on threads or run order.
-fn verify_selected(crc1: u32, crc2: u32, fraction: f64) -> bool {
+pub fn verify_selected(crc1: u32, crc2: u32, fraction: f64) -> bool {
     if fraction >= 1.0 {
         return true;
     }
@@ -1873,7 +1873,7 @@ impl DistanceEngine {
         let manifest = source.manifest()?;
         manifest.check_compatible(
             &self.hasher_type,
-            &crate::store::AlignmentParams::from(&self.config),
+            &crate::store::StoreParams::Dna(crate::store::AlignmentParams::from(&self.config)),
         )?;
         // coding counts only if computed with the run's genetic code (or when
         // the run does not ask for a specific one)
@@ -2065,14 +2065,16 @@ impl DistanceEngine {
     }
 
     /// Translate the run's alleles and align the missing protein pairs.
+    /// `sources`: protein cache stores to take pairs from before aligning.
     pub fn precompute_proteins(
         &mut self,
         unique_pairs: &HashSet<(String, u32, u32)>,
+        sources: &[crate::store::remote::Source],
     ) -> Result<(), String> {
         let (Some(store), Some(db)) = (self.protein.as_mut(), self.sequence_db.as_ref()) else {
             return Ok(());
         };
-        store.precompute(db, unique_pairs)
+        store.precompute(db, unique_pairs, sources)
     }
 
     /// Protein-level terms of an allele pair (alleles present and different):

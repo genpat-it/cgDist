@@ -8,6 +8,20 @@ until the API stabilizes).
 
 ## [Unreleased]
 
+### Added (protein stores)
+- Protein cache stores: `cgdist-cache build --protein` precomputes every
+  pair of distinct proteins of a schema (genetic code, matrix and gap
+  penalties recorded in the manifest). cgdist reads them with
+  `--protein-cache-layer` (repeatable; dir, `.cgpack` or URL) and keeps its
+  own with `--protein-cache-dir`. Results are identical to computing
+  proteins on the fly; mismatching settings or store kinds are refused.
+- `cgdist-cache verify --schema DIR --realign F` recomputes a deterministic
+  fraction of the stored pairs from the schema: DNA pairs with cgdist's
+  engine, each also checked against parasail's original kernel, and protein
+  pairs by translating and aligning again.
+- `cgdist-cache stats` writes per-locus summaries and pair histograms (JSON).
+- Built-in substitution matrix names are case-insensitive.
+
 ### Changed
 
 - Alignments are much faster with bit-identical results. A pair is first

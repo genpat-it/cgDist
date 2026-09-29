@@ -177,6 +177,12 @@ impl Args {
         if self.protein_cache_file.is_none() {
             self.protein_cache_file = config.protein_cache_file;
         }
+        if self.protein_cache_dir.is_none() {
+            self.protein_cache_dir = config.protein_cache_dir;
+        }
+        if self.protein_cache_layer.is_empty() {
+            self.protein_cache_layer = config.protein_cache_layer.unwrap_or_default();
+        }
 
         self
     }

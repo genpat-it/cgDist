@@ -269,7 +269,7 @@ pub fn pull(
     loci: Option<&HashSet<String>>,
 ) -> Result<PullStats, String> {
     let remote = source.manifest()?;
-    let mut store = Store::open_or_create(dest, &remote.hasher, remote.alignment)?;
+    let mut store = Store::open_or_create(dest, &remote.hasher, remote.params()?)?;
     if store.manifest.genetic_code.is_some() && store.manifest.genetic_code != remote.genetic_code {
         return Err(format!(
             "{} holds coding counts for another genetic code than {}",
@@ -335,7 +335,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let (src, pack_path, dst) = (base.join("src"), base.join("s.cgpack"), base.join("dst"));
         let params = AlignmentParams::from(&AlignmentConfig::default());
-        let mut st = Store::create(&src, "crc32", params).unwrap();
+        let mut st = Store::create(&src, "crc32", crate::store::StoreParams::Dna(params)).unwrap();
         for (i, locus) in ["L1", "L2", "L3"].iter().enumerate() {
             let mut d = LocusData::default();
             d.set_allele_len(10, 900);

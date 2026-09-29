@@ -187,6 +187,17 @@ pub struct Args {
     #[argh(option)]
     pub protein_cache_file: Option<String>,
 
+    /// protein cache store directory (read and written) for aa-* modes and
+    /// aa_* weights: created if missing; receives the protein pairs aligned
+    /// in this run
+    #[argh(option)]
+    pub protein_cache_dir: Option<String>,
+
+    /// read-only protein cache store: a directory, a .cgpack file or a URL
+    /// of either (repeatable; only the needed loci are read)
+    #[argh(option)]
+    pub protein_cache_layer: Vec<String>,
+
     /// compute and store synonymous/nonsynonymous SNP counts in the cache
     /// even when the distance mode does not use them
     #[argh(switch)]

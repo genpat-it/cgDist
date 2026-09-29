@@ -97,16 +97,20 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
             matrix: args.aa_matrix.clone(),
             gap_open: args.aa_gap_open,
             gap_extend: args.aa_gap_extend,
-        };
+        }
+        .normalized();
         settings.validate()?;
         if args.hasher_type == "hamming" {
             return Err("protein-level modes need allele sequences; they are not available with --hasher-type hamming".to_string());
         }
         Some(settings)
     } else {
-        if args.protein_cache_file.is_some() {
+        if args.protein_cache_file.is_some()
+            || args.protein_cache_dir.is_some()
+            || !args.protein_cache_layer.is_empty()
+        {
             return Err(
-                "--protein-cache-file is only used with aa-* modes or aa_* weights".to_string(),
+                "--protein-cache-file, --protein-cache-dir and --protein-cache-layer are only used with aa-* modes or aa_* weights".to_string(),
             );
         }
         None
@@ -115,6 +119,9 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
         return Err("synonymous/nonsynonymous counts need sequence alignments; they are not available with --hasher-type hamming".to_string());
     }
 
+    if args.protein_cache_dir.is_some() && args.protein_cache_file.is_some() {
+        return Err("use either --protein-cache-file or --protein-cache-dir, not both".to_string());
+    }
     if args.cache_dir.is_some() && args.cache_file.is_some() {
         return Err("use either --cache-file or --cache-dir, not both".to_string());
     }
