@@ -459,6 +459,34 @@ which stores both gapped sequences. Both files contain only the pairs
 aligned in that run: pairs already in the cache are not re-aligned, so use
 `--force-recompute` (or no cache) to get every pair.
 
+### Inspecting one allele pair (`cgdist-diff`)
+
+`cgdist-diff` takes two allele hashes, as found in hashed profiles and in the
+cache keys, and lists every difference with its position and bases. It
+aligns the two alleles exactly as cgdist does:
+
+```bash
+cgdist-diff --schema schema_dir/ --locus cgMLST-00081096 \
+    --hash1 4106171463 --hash2 1998779011 --cache-file cache.lz4
+```
+
+```
+allele 1   hash 1998779011  cgMLST-00081096_9  735 bp
+allele 2   hash 4106171463  cgMLST-00081096_29  738 bp
+counts     snps=36  indel_events=1  indel_bases=3  score=1353
+cigar      23=1X101=1X...2=3D3=1X5=1X
+SNP        allele1     24 G  ->  allele2     24 A
+...
+INS #1     after allele1    725  allele2 726-728  +AAT (3 bp)
+SNP        allele1    729 A  ->  allele2    732 C
+cache      snps=36  indel_events=1  indel_bases=3  -> MATCH
+```
+
+Allele 1 is the one with the smaller hash, as in the cache. `INS`/`DEL` are
+relative to allele 1. `--tsv` prints the same list as a table, and
+`--cache-file` checks the counts against the cache entry (exit code 2 on a
+mismatch).
+
 ## 🧬 Recombination-Candidate Flagging
 
 cgDist includes a companion screen that flags **candidate** recombinant loci based on per-locus mutation density. This is **not** a recombination detector: confirmation of recombination requires downstream phylogeny-aware tools (e.g. Gubbins, ClonalFrameML, fastGEAR). The flagging output identifies which loci warrant that follow-up.

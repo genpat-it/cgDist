@@ -57,6 +57,10 @@ until the API stabilizes).
   InDel, about 35x smaller than `--save-alignments`. It equals parasail's
   `get_cigar` (verified exhaustively on short sequences and on 739,554 real
   pairs).
+- `cgdist-diff`: lists the SNPs, insertions and deletions between two
+  alleles of a locus, given their hashes, with positions, bases and CIGAR.
+  The alleles are aligned exactly as cgdist does, and the counts can be
+  checked against a cache entry (`--cache-file`).
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).

@@ -308,6 +308,62 @@ fn align_global_trace(
     }
 }
 
+/// A pairwise alignment with its gapped strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairAlignment {
+    pub snps: usize,
+    pub indel_events: usize,
+    pub indel_bases: usize,
+    pub score: i32,
+    /// query (first allele) with '-' for gaps
+    pub query: String,
+    /// reference (second allele) with '-' for gaps
+    pub reference: String,
+}
+
+/// Align two alleles exactly as cgdist does when it writes --save-alignments
+/// rows: certified banded alignment when possible, else parasail; statistics
+/// are computed from the gapped strings. Returns None when the pair cannot
+/// be aligned (parasail refused it).
+pub fn align_pair_with_strings(
+    config: &AlignmentConfig,
+    query: &[u8],
+    reference: &[u8],
+) -> Option<PairAlignment> {
+    if !query.contains(&0) && !reference.contains(&0) && query.is_ascii() && reference.is_ascii() {
+        let scoring = Scoring {
+            match_score: config.match_score,
+            mismatch: config.mismatch_penalty,
+            gap_open: config.gap_open,
+            gap_extend: config.gap_extend,
+        };
+        if let Some((b, st)) = align_certified_with_strings(query, reference, &scoring, 0.5) {
+            let q = String::from_utf8_lossy(&st.query).into_owned();
+            let r = String::from_utf8_lossy(&st.reference).into_owned();
+            let (snps, indel_events, indel_bases) = compute_alignment_stats(&q, &r);
+            return Some(PairAlignment {
+                snps,
+                indel_events,
+                indel_bases,
+                score: b.score,
+                query: q,
+                reference: r,
+            });
+        }
+    }
+    let res = align_global_trace(config, query, reference)?.ok()?;
+    let tb = res.get_traceback_strings(query, reference).ok()?;
+    let (snps, indel_events, indel_bases) = compute_alignment_stats(&tb.query, &tb.reference);
+    Some(PairAlignment {
+        snps,
+        indel_events,
+        indel_bases,
+        score: res.get_score(),
+        query: tb.query,
+        reference: tb.reference,
+    })
+}
+
 /// Deterministic choice of the pairs re-checked by --verify-alignments:
 /// depends only on the two allele hashes, not on threads or run order.
 fn verify_selected(crc1: u32, crc2: u32, fraction: f64) -> bool {
