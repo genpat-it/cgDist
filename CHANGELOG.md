@@ -13,9 +13,11 @@ until the API stabilizes).
 Bug-fix release. Two cache bugs, both present since 0.1.0, are fixed.
 **Upgrading is recommended for anyone who reuses cache files.** Without a cache,
 and with caches never used in Hamming mode, distance matrices are unchanged:
-all four modes (with and without `--min-loci`) were checked byte-identical
-against 0.1.3 on a real *L. monocytogenes* dataset (300 samples × 1,748 loci),
-and cached runs matched uncached runs in every mode tested.
+all four modes were checked byte-identical against 0.1.3 on real
+*L. monocytogenes* (300 samples × 1,748 loci; also with `--min-loci`, all
+output formats and `--emit-pairs`/`--report-ci`) and *S. enterica* (120
+samples × 8,558 loci) datasets, and cached runs matched uncached runs in every
+mode tested, including after a Hamming run on the same cache.
 
 ### ⚠️ Advisory — caches shared with Hamming mode
 
