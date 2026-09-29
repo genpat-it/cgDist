@@ -20,9 +20,22 @@ struct CacheEntry {
     snps: usize,
     indel_events: usize,
     indel_bases: usize,
-    /// Mean of the two aligned allele lengths (bp), when available (enriched
-    /// cache only). Enables per-locus mutation-density / recombination signals.
-    len: Option<u32>,
+    /// Nucleotide lengths of the two alleles (key order: smaller CRC first),
+    /// when known. Enables per-locus mutation-density / recombination signals.
+    lens: (Option<u32>, Option<u32>),
+}
+
+impl CacheEntry {
+    /// Mean allele length, as cgdist has always derived it from the two
+    /// stored lengths.
+    fn mean_len(&self) -> Option<u32> {
+        match self.lens {
+            (Some(a), Some(b)) => Some((a + b) / 2),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
+    }
 }
 
 /// Distance calculation engine
@@ -344,7 +357,7 @@ impl DistanceEngine {
     /// hasher is sequence-based. Used to decide whether to include recombination
     /// in the dashboard.
     pub fn has_recomb_data(&self) -> bool {
-        self.hasher_type != "hamming" && self.cache.values().any(|e| e.len.is_some())
+        self.hasher_type != "hamming" && self.cache.values().any(|e| e.mean_len().is_some())
     }
 
     /// Per-locus recombination signal for an allele pair: `Some(true)` if the
@@ -372,7 +385,7 @@ impl DistanceEngine {
             crc2: max_crc,
         };
         let entry = self.cache.get(&key)?;
-        let len = entry.len?;
+        let len = entry.mean_len()?;
         if len == 0 {
             return None;
         }
@@ -404,10 +417,18 @@ impl DistanceEngine {
             snps,
             indel_events,
             indel_bases,
-            len: None, // fresh compute: lengths added only via enriched cache
+            lens: (None, None), // set by precompute_alignments when sequences are known
         };
         self.cache.insert(key, entry);
         self.has_new_entries = true; // Mark that cache has new entries
+    }
+
+    /// True when every cache entry carries both allele lengths, i.e. a
+    /// separate enrichment pass over the schema would change nothing.
+    pub fn all_entries_have_lengths(&self) -> bool {
+        self.cache
+            .values()
+            .all(|e| e.lens.0.is_some() && e.lens.1.is_some())
     }
 
     /// Get cache statistics
@@ -453,14 +474,25 @@ impl DistanceEngine {
                 indel_events: entry.indel_events,
                 indel_bases: entry.indel_bases,
                 computed_at: now.clone(), // Keep this clone as now is reused
-                // Keep lengths already known (enriched cache). Only the pair's
-                // mean length is held in memory, so it is written for both
-                // sequences; load_cache averages them back to the same value.
-                seq1_length: entry.len.map(|l| l as usize),
-                seq2_length: entry.len.map(|l| l as usize),
+                // Keep the allele lengths already known (computed or enriched)
+                seq1_length: entry.lens.0.map(|l| l as usize),
+                seq2_length: entry.lens.1.map(|l| l as usize),
             };
 
             data.insert(string_key, cache_value);
+        }
+
+        // Same note the enrichment pass adds, so a cache whose lengths were
+        // recorded at alignment time is labelled like an enriched one.
+        let mut user_note = self.cache_note.clone();
+        if !self.cache.is_empty() && self.all_entries_have_lengths() {
+            match user_note {
+                Some(ref mut note) if !note.contains("Enriched with sequence lengths") => {
+                    note.push_str(" [Enriched with sequence lengths]")
+                }
+                None => user_note = Some("Enriched with sequence lengths".to_string()),
+                _ => {}
+            }
         }
 
         let metadata = CacheMetadata {
@@ -475,7 +507,7 @@ impl DistanceEngine {
                 DistanceMode::SnpsAndIndelBases => "snps-indel-bases".to_string(),
                 DistanceMode::Hamming => "hamming".to_string(),
             },
-            user_note: self.cache_note.clone(),
+            user_note,
             total_entries: self.cache.len(),
             unique_loci: unique_loci.len(),
             format_version: 2, // Version 2 = modern format
@@ -658,17 +690,14 @@ impl DistanceEngine {
                         crc1: parts[1].parse().unwrap_or(0),
                         crc2: parts[2].parse().unwrap_or(0),
                     };
-                    let len = match (cache_value.seq1_length, cache_value.seq2_length) {
-                        (Some(a), Some(b)) => Some(((a + b) / 2) as u32),
-                        (Some(a), None) => Some(a as u32),
-                        (None, Some(b)) => Some(b as u32),
-                        (None, None) => None,
-                    };
                     let entry = CacheEntry {
                         snps: cache_value.snps,
                         indel_events: cache_value.indel_events,
                         indel_bases: cache_value.indel_bases,
-                        len,
+                        lens: (
+                            cache_value.seq1_length.map(|l| l as u32),
+                            cache_value.seq2_length.map(|l| l as u32),
+                        ),
                     };
                     self.cache.insert(key, entry);
                 }
@@ -718,7 +747,7 @@ impl DistanceEngine {
                     snps,
                     indel_events,
                     indel_bases,
-                    len: None, // legacy cache carries no sequence lengths
+                    lens: (None, None), // legacy cache carries no sequence lengths
                 };
                 self.cache.insert(key, entry);
             }
@@ -843,21 +872,23 @@ impl DistanceEngine {
         // Store results in cache (and collect alignment detail rows for --save-alignments)
         for (locus, crc1, crc2, snps, indel_events, indel_bases, detail) in results {
             self.cache_distance(locus, crc1, crc2, snps, indel_events, indel_bases);
-            // Both sequences were just aligned, so the pair's length is known:
-            // record it now instead of relying on a later enrichment pass.
-            let len = self.sequence_db.as_ref().and_then(|db| {
-                let l1 = db.get_sequence(locus, crc1)?.sequence.len();
-                let l2 = db.get_sequence(locus, crc2)?.sequence.len();
-                Some(((l1 + l2) / 2) as u32)
+            // Both sequences were just aligned, so their lengths are known:
+            // record them now (per locus) instead of in a later enrichment pass.
+            let (lo, hi) = (crc1.min(crc2), crc1.max(crc2));
+            let lens = self.sequence_db.as_ref().map(|db| {
+                (
+                    db.get_sequence(locus, lo).map(|s| s.sequence.len() as u32),
+                    db.get_sequence(locus, hi).map(|s| s.sequence.len() as u32),
+                )
             });
-            if let Some(len) = len {
+            if let Some(lens) = lens {
                 let key = DistanceCacheKey {
                     locus: locus.clone(),
-                    crc1: crc1.min(crc2),
-                    crc2: crc1.max(crc2),
+                    crc1: lo,
+                    crc2: hi,
                 };
                 if let Some(e) = self.cache.get_mut(&key) {
-                    e.len = Some(len);
+                    e.lens = lens;
                 }
             }
             if let Some(row) = detail {
@@ -1146,11 +1177,15 @@ impl DistanceEngine {
     ) -> Result<usize, String> {
         // Load sequence lengths from schema with CRC mapping
         println!("🔍 Loading schema lengths with CRC mapping from {schema_path}...");
-        let (schema_lengths, crc_to_length) = self.load_schema_with_crc_mapping(schema_path)?;
+        // Lengths are looked up per locus: CRC32 values collide across loci of
+        // large schemas (e.g. ~900 in S. enterica), so a schema-wide CRC map
+        // could assign the length of another locus' allele.
+        let (schema_lengths, crc_by_locus) = self.load_schema_with_crc_mapping(schema_path)?;
+        let crc_mappings: usize = crc_by_locus.values().map(|m| m.len()).sum();
         println!(
             "📊 Loaded {} loci from schema with {} CRC mappings",
             schema_lengths.len(),
-            crc_to_length.len()
+            crc_mappings
         );
 
         // Read from input cache file
@@ -1190,12 +1225,13 @@ impl DistanceEngine {
                 // Parse CRCs as u32
                 if let (Ok(crc1), Ok(crc2)) = (crc1_str.parse::<u32>(), crc2_str.parse::<u32>()) {
                     // Look up lengths using CRC mapping
-                    if let Some(&len1) = crc_to_length.get(&crc1) {
+                    let locus_map = crc_by_locus.get(locus);
+                    if let Some(&len1) = locus_map.and_then(|m| m.get(&crc1)) {
                         value.seq1_length = Some(len1);
                         found_any = true;
                     }
 
-                    if let Some(&len2) = crc_to_length.get(&crc2) {
+                    if let Some(&len2) = locus_map.and_then(|m| m.get(&crc2)) {
                         value.seq2_length = Some(len2);
                         found_any = true;
                     }
@@ -1271,13 +1307,19 @@ impl DistanceEngine {
     fn load_schema_with_crc_mapping(
         &self,
         schema_path: &str,
-    ) -> Result<(HashMap<String, HashMap<String, usize>>, HashMap<u32, usize>), String> {
+    ) -> Result<
+        (
+            HashMap<String, HashMap<String, usize>>,
+            HashMap<String, HashMap<u32, usize>>,
+        ),
+        String,
+    > {
         use std::fs;
         use std::path::Path;
 
         let schema_dir = Path::new(schema_path);
         let mut all_lengths = HashMap::new();
-        let mut crc_to_length = HashMap::new();
+        let mut crc_by_locus = HashMap::new();
 
         // Get hasher for CRC calculation
         let registry = HasherRegistry::new();
@@ -1297,8 +1339,8 @@ impl DistanceEngine {
                     let locus_name = filename.to_string();
                     match self.load_fasta_with_crc_mapping(&path, hasher) {
                         Ok((lengths, crc_map)) => {
-                            all_lengths.insert(locus_name, lengths);
-                            crc_to_length.extend(crc_map);
+                            all_lengths.insert(locus_name.clone(), lengths);
+                            crc_by_locus.insert(locus_name, crc_map);
                         }
                         Err(e) => {
                             eprintln!("⚠️  Warning: Failed to load {filename}: {e}");
@@ -1308,7 +1350,7 @@ impl DistanceEngine {
             }
         }
 
-        Ok((all_lengths, crc_to_length))
+        Ok((all_lengths, crc_by_locus))
     }
 
     /// Load FASTA file with both lengths and CRC mapping

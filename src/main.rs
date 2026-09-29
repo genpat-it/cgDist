@@ -423,7 +423,12 @@ fn run_main() -> Result<(), String> {
                     println!("📁 Cache saved to: {cache_path}");
 
                     // Check if we should automatically enrich the newly saved cache
-                    let should_auto_enrich = !args.enrich_lengths && schema.is_some();
+                    // Skipped when every entry already carries both allele lengths
+                    // (newly aligned pairs record them): enrichment would
+                    // re-read the whole schema and change nothing.
+                    let should_auto_enrich = !args.enrich_lengths
+                        && schema.is_some()
+                        && !engine.all_entries_have_lengths();
 
                     if should_auto_enrich {
                         if let Some(schema_path) = schema {
@@ -565,7 +570,12 @@ fn run_main() -> Result<(), String> {
                 } else {
                     // Check if we should automatically enrich the newly saved cache
                     // This covers the case where cache was created for the first time
-                    let should_auto_enrich = !args.enrich_lengths && schema.is_some();
+                    // Skipped when every entry already carries both allele lengths
+                    // (newly aligned pairs record them): enrichment would
+                    // re-read the whole schema and change nothing.
+                    let should_auto_enrich = !args.enrich_lengths
+                        && schema.is_some()
+                        && !engine.all_entries_have_lengths();
 
                     if should_auto_enrich {
                         if let Some(schema_path) = schema {

@@ -20,9 +20,24 @@ until the API stabilizes).
   instead of the slower striped kernel. The proof, the invariants and the
   verification (exhaustive over all short sequences, 739,554 real allele
   pairs, adversarial fuzzing: no differences) are in
-  `docs/BANDED_ALIGNMENT_PROOF.md`. Cold runs (16 threads): 72 s -> 3.8 s
-  (L. monocytogenes, 300 samples), 153 s -> 11 s (S. enterica, 120
-  samples), with distance matrices and cache contents identical to 0.1.4.
+  `docs/BANDED_ALIGNMENT_PROOF.md`. Distance matrices and cache statistics
+  are identical to 0.1.4.
+
+- A cache no longer goes through a separate enrichment pass after saving
+  when every entry already has its allele lengths: newly aligned pairs record
+  both lengths at alignment time, which avoids re-reading the whole schema.
+  Cold runs with `--cache-file` (16 threads): 72 s -> 2.4 s
+  (L. monocytogenes, 300 samples), 153 s -> 4.2 s (S. enterica, 120 samples).
+
+### Fixed
+
+- Cache enrichment looked up allele lengths in one CRC32 map for the whole
+  schema. CRC32 values collide across loci of large schemas (906 colliding
+  CRCs with different lengths in the S. enterica schema), so some entries
+  received the length of another locus' allele, depending on file order.
+  Lengths are now always taken per locus (215 affected entries in the 120
+  sample S. enterica test set; distances were never affected, only
+  recombination densities).
 
 ### Added
 
