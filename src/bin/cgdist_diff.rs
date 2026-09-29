@@ -10,6 +10,7 @@ use bio::io::fasta;
 use cgdist::core::alignment::{cigar_from_aligned, AlignmentConfig};
 use cgdist::core::distance::{align_pair_with_strings, ModernCache};
 use cgdist::core::protein::{self, GeneticCode, SnpAnnotation, SnpEffect};
+use cgdist::core::protein_distance::{align_proteins_with_strings, protein_of, ProteinSettings};
 use std::path::Path;
 
 #[derive(FromArgs)]
@@ -71,6 +72,23 @@ struct Args {
     /// is the first codon
     #[argh(switch)]
     no_first_codon_as_met: bool,
+
+    /// substitution matrix for the protein alignment (default: blosum62)
+    #[argh(option, default = "String::from(\"blosum62\")")]
+    aa_matrix: String,
+
+    /// protein gap open penalty (default: 11)
+    #[argh(option, default = "11")]
+    aa_gap_open: i32,
+
+    /// protein gap extend penalty (default: 1)
+    #[argh(option, default = "1")]
+    aa_gap_extend: i32,
+
+    /// also list the amino-acid substitutions and InDels of the protein
+    /// alignment (TSV rows AA_SUB / AA_INS / AA_DEL)
+    #[argh(switch)]
+    protein_diffs: bool,
 }
 
 /// One difference between the two alleles.
@@ -263,6 +281,24 @@ fn run(args: Args) -> Result<i32, String> {
     };
     let (prot1, prot2) = (code.translate(&s1), code.translate(&s2));
 
+    // protein alignment, exactly as the aa-* distance modes compute it
+    let psettings = ProteinSettings {
+        translation_table: args.translation_table,
+        first_codon_as_met: !args.no_first_codon_as_met,
+        matrix: args.aa_matrix.clone(),
+        gap_open: args.aa_gap_open,
+        gap_extend: args.aa_gap_extend,
+    };
+    psettings.validate()?;
+    let (pp1, pp2) = (protein_of(&code, &s1), protein_of(&code, &s2));
+    let (paln, pq, pr) = align_proteins_with_strings(&psettings, &pp1, &pp2)
+        .ok_or("the proteins could not be aligned")?;
+    let pdiffs = if pp1 == pp2 {
+        Vec::new()
+    } else {
+        differences(pq.as_bytes(), pr.as_bytes())
+    };
+
     if args.tsv {
         println!("type\tevent\tallele1_start\tallele1_end\tallele2_start\tallele2_end\tallele1_bases\tallele2_bases\teffect\tcodon1\tcodon2\tprotein_change");
         for (i, d) in diffs.iter().enumerate() {
@@ -289,6 +325,35 @@ fn run(args: Args) -> Result<i32, String> {
                 c2,
                 pc
             );
+        }
+        if args.protein_diffs {
+            for d in &pdiffs {
+                let kind = match d.kind {
+                    "SNP" => "AA_SUB",
+                    "INS" => "AA_INS",
+                    _ => "AA_DEL",
+                };
+                let change = if d.kind == "SNP" {
+                    format!(
+                        "p.{}{}{}",
+                        protein::aa_name(d.bases1.as_bytes()[0]),
+                        d.a1.0,
+                        protein::aa_name(d.bases2.as_bytes()[0])
+                    )
+                } else {
+                    "-".to_string()
+                };
+                println!(
+                    "{kind}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t-\t-\t-\t{change}",
+                    d.event,
+                    d.a1.0,
+                    d.a1.1,
+                    d.a2.0,
+                    d.a2.1,
+                    if d.bases1.is_empty() { "-" } else { &d.bases1 },
+                    if d.bases2.is_empty() { "-" } else { &d.bases2 }
+                );
+            }
         }
     } else {
         println!("locus      {}", args.locus);
@@ -359,6 +424,15 @@ fn run(args: Args) -> Result<i32, String> {
                 "proteins differ"
             }
         );
+        println!(
+            "protein    alignment ({}, gaps {}/{}): aa_subs={}  aa_indel_events={}  aa_indel_residues={}",
+            psettings.matrix,
+            psettings.gap_open,
+            psettings.gap_extend,
+            paln.aa_subs,
+            paln.aa_indel_events,
+            paln.aa_indel_residues
+        );
         println!("cigar      {cigar}");
         println!(
             "           (INS/DEL are relative to allele 1: INS = bases only in allele 2, \
@@ -404,6 +478,42 @@ fn run(args: Args) -> Result<i32, String> {
                     d.bases1,
                     d.bases1.len(),
                     effect_of(i)
+                ),
+            }
+        }
+    }
+
+    if args.protein_diffs && !args.tsv && !pdiffs.is_empty() {
+        println!();
+        for d in &pdiffs {
+            match d.kind {
+                "SNP" => println!(
+                    "AA_SUB     protein1 {:>5} {}  ->  protein2 {:>5} {}   p.{}{}{}",
+                    d.a1.0,
+                    d.bases1,
+                    d.a2.0,
+                    d.bases2,
+                    protein::aa_name(d.bases1.as_bytes()[0]),
+                    d.a1.0,
+                    protein::aa_name(d.bases2.as_bytes()[0])
+                ),
+                "INS" => println!(
+                    "AA_INS #{:<3} after protein1 {:>5}  protein2 {}-{}  +{} ({} aa)",
+                    d.event,
+                    d.a1.0,
+                    d.a2.0,
+                    d.a2.1,
+                    d.bases2,
+                    d.bases2.len()
+                ),
+                _ => println!(
+                    "AA_DEL #{:<3} protein1 {}-{}  after protein2 {:>5}  -{} ({} aa)",
+                    d.event,
+                    d.a1.0,
+                    d.a1.1,
+                    d.a2.0,
+                    d.bases1,
+                    d.bases1.len()
                 ),
             }
         }

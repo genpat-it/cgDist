@@ -96,19 +96,39 @@ thread_local! {
 /// InDels. Scan kernel at 16-bit, escalated to 32/64-bit on saturation, as
 /// for DNA. None if parasail cannot align them.
 pub fn align_proteins(s: &ProteinSettings, p1: &[u8], p2: &[u8]) -> Option<ProteinPair> {
+    align_proteins_with_strings(s, p1, p2).map(|(r, _, _)| r)
+}
+
+/// Like `align_proteins`, also returning the gapped protein strings.
+pub fn align_proteins_with_strings(
+    s: &ProteinSettings,
+    p1: &[u8],
+    p2: &[u8],
+) -> Option<(ProteinPair, String, String)> {
     if p1.is_empty() || p2.is_empty() {
         // parasail needs non-empty input: an empty protein vs a protein of
         // length L is one InDel event of L residues
         let l = p1.len().max(p2.len()) as u32;
-        return Some(ProteinPair {
-            aa_subs: 0,
-            aa_indel_events: u32::from(l > 0),
-            aa_indel_residues: l,
-            aa_length1: p1.len() as u32,
-            aa_length2: p2.len() as u32,
-        });
+        let gaps = "-".repeat(l as usize);
+        let (a, b) = if p1.is_empty() {
+            (gaps, String::from_utf8_lossy(p2).into_owned())
+        } else {
+            (String::from_utf8_lossy(p1).into_owned(), gaps)
+        };
+        return Some((
+            ProteinPair {
+                aa_subs: 0,
+                aa_indel_events: u32::from(l > 0),
+                aa_indel_residues: l,
+                aa_length1: p1.len() as u32,
+                aa_length2: p2.len() as u32,
+            },
+            a,
+            b,
+        ));
     }
-    let run = |width: i32| -> Option<(Option<ProteinPair>, bool)> {
+    type Out = Option<(Option<(ProteinPair, String, String)>, bool)>;
+    let run = |width: i32| -> Out {
         AA_ALIGNERS.with(|cell| {
             let mut v = cell.borrow_mut();
             let idx = match v.iter().position(|(k, w, _)| k == s && *w == width) {
@@ -135,13 +155,17 @@ pub fn align_proteins(s: &ProteinSettings, p1: &[u8], p2: &[u8]) -> Option<Prote
             let tb = res.get_traceback_strings(p1, p2).ok()?;
             let (subs, ev, residues) = compute_alignment_stats(&tb.query, &tb.reference);
             Some((
-                Some(ProteinPair {
-                    aa_subs: subs as u32,
-                    aa_indel_events: ev as u32,
-                    aa_indel_residues: residues as u32,
-                    aa_length1: p1.len() as u32,
-                    aa_length2: p2.len() as u32,
-                }),
+                Some((
+                    ProteinPair {
+                        aa_subs: subs as u32,
+                        aa_indel_events: ev as u32,
+                        aa_indel_residues: residues as u32,
+                        aa_length1: p1.len() as u32,
+                        aa_length2: p2.len() as u32,
+                    },
+                    tb.query,
+                    tb.reference,
+                )),
                 false,
             ))
         })

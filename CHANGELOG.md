@@ -83,6 +83,10 @@ until the API stabilizes).
   - syn + nonsyn + frame_disrupted = snps on all 739,554 cache entries;
   - counts equal to cgdist-diff (Biopython-validated) on 600 pairs;
   - completing a 0.1.4 cache reproduces every cached SNP/InDel count.
+- `cgdist-diff` also aligns the two proteins, with the same settings as the
+  aa-* modes, and with `--protein-diffs` lists each amino-acid
+  substitution and InDel. Its counts match the protein cache on 300 random
+  pairs.
 - Protein-level distances (new module `core::protein_distance`):
   - modes `aa-hamming`, `aa-substitutions`, `aa-substitutions-indel-events`
     and `aa-substitutions-indel-residues`, plus the `aa_*` keys for

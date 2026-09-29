@@ -528,6 +528,12 @@ bcftools csq). Protein changes are numbered on allele 1 (`p.Glu243Asp`,
 `p.Arg8=`). The summary counts synonymous and nonsynonymous SNPs and says
 whether the two proteins are identical.
 
+The two proteins are also aligned, with `--aa-matrix`, `--aa-gap-open` and
+`--aa-gap-extend` as in the `aa-*` distance modes. The summary gives their
+substitutions and InDels, and `--protein-diffs` lists each amino-acid
+difference (`AA_SUB`, `AA_INS`, `AA_DEL`) with protein positions, for
+example `AA_SUB protein1 243 E -> protein2 244 D p.Glu243Asp`.
+
 ## 🧪 Synonymous / Nonsynonymous and Custom Distances
 
 The SNPs of every aligned pair can be classified at codon level, with the
