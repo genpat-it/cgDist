@@ -250,6 +250,7 @@ fn build(a: Build) -> Result<(), String> {
         .collect();
     files.sort();
     let start = Instant::now();
+    let mut last_save = Instant::now();
     let (mut done_pairs, mut total_new) = (0u64, 0u64);
     let n_files = files.len();
     for (fi, path) in files.iter().enumerate() {
@@ -327,7 +328,12 @@ fn build(a: Build) -> Result<(), String> {
         }
         done_pairs += (n * n.saturating_sub(1) / 2) as u64;
         store.write_locus(&locus, &data)?;
-        store.save_manifest()?;
+        // the manifest is the resume point: save it every ~30 s (a locus
+        // file written after the last save is simply rebuilt on resume)
+        if last_save.elapsed().as_secs() >= 30 {
+            store.save_manifest()?;
+            last_save = Instant::now();
+        }
         let el = start.elapsed().as_secs_f64();
         println!(
             "[{}/{}] {locus}: {n} alleles, {} new pairs ({}complete)  | {total_new} new pairs in {el:.0}s",
@@ -337,6 +343,7 @@ fn build(a: Build) -> Result<(), String> {
             if data.is_complete() { "" } else { "in" }
         );
     }
+    store.save_manifest()?;
     println!(
         "✅ store {}: {} loci, {done_pairs} pairs covered, {total_new} newly aligned in {:.1}s",
         a.out,
