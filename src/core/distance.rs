@@ -86,6 +86,33 @@ struct DistanceCacheKey {
     crc2: u32,
 }
 
+/// True for cache files written by a cgdist older than 0.1.4, the first
+/// release that no longer stores placeholder statistics in Hamming mode.
+fn written_before_hamming_fix(version: &str) -> bool {
+    let mut it = version.split('.').map(|p| {
+        p.chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse::<u64>()
+            .unwrap_or(0)
+    });
+    let v = (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    );
+    v < (0, 1, 4)
+}
+
+/// Alignment results are interchangeable iff the scoring parameters match;
+/// the free-text description is irrelevant.
+fn same_alignment_params(a: &AlignmentConfig, b: &AlignmentConfig) -> bool {
+    a.match_score == b.match_score
+        && a.mismatch_penalty == b.mismatch_penalty
+        && a.gap_open == b.gap_open
+        && a.gap_extend == b.gap_extend
+}
+
 impl DistanceEngine {
     pub fn new(config: AlignmentConfig, hasher_type: String) -> Self {
         Self {
@@ -141,9 +168,11 @@ impl DistanceEngine {
             return 0; // Identical alleles
         }
 
-        // Fast path for hamming hasher
-        if self.hasher_type == "hamming" {
-            return 1; // Different CRCs = distance 1 for Hamming
+        // Hamming distance never needs the alignment cache: different CRCs = 1.
+        // (Answering from the cache here would make the result depend on
+        // whatever happens to be cached.)
+        if self.hasher_type == "hamming" || mode == DistanceMode::Hamming {
+            return 1;
         }
 
         // Optimized key lookup - temporarily create key for lookup only
@@ -310,8 +339,11 @@ impl DistanceEngine {
                 indel_events: entry.indel_events,
                 indel_bases: entry.indel_bases,
                 computed_at: now.clone(), // Keep this clone as now is reused
-                seq1_length: None,        // Will be enriched later if requested
-                seq2_length: None,        // Will be enriched later if requested
+                // Keep lengths already known (enriched cache). Only the pair's
+                // mean length is held in memory, so it is written for both
+                // sequences; load_cache averages them back to the same value.
+                seq1_length: entry.len.map(|l| l as usize),
+                seq2_length: entry.len.map(|l| l as usize),
             };
 
             data.insert(string_key, cache_value);
@@ -460,7 +492,7 @@ impl DistanceEngine {
             );
 
             // Check alignment configuration compatibility
-            if modern_cache.metadata.alignment_config != self.config {
+            if !same_alignment_params(&modern_cache.metadata.alignment_config, &self.config) {
                 return Err(format!(
                     "Cache alignment config mismatch:\n  Cache: {:?}\n  Engine: {:?}",
                     modern_cache.metadata.alignment_config, self.config
@@ -473,6 +505,20 @@ impl DistanceEngine {
                     "Cache hasher type mismatch:\n  Cache: {}\n  Engine: {}",
                     modern_cache.metadata.hasher_type, self.hasher_type
                 ));
+            }
+
+            // cgdist <= 0.1.3 stored placeholder statistics (1 SNP, 0 InDels)
+            // for every pair it saw in Hamming mode. A cache last written in
+            // Hamming mode may therefore hold values that are not alignments.
+            if modern_cache.metadata.distance_mode == "hamming"
+                && written_before_hamming_fix(&modern_cache.metadata.version)
+            {
+                eprintln!(
+                    "⚠️  WARNING: this cache was last written by a Hamming-mode run. cgdist <= 0.1.3 \
+                     stored placeholder values (1 SNP, 0 InDels) for pairs in Hamming mode, so \
+                     SNP/InDel distances read from this cache may be wrong. Rebuild it (delete \
+                     the file or use --force-recompute) unless it was written by cgdist >= 0.1.4."
+                );
             }
 
             // Check distance mode compatibility - TEMPORARILY DISABLED
@@ -541,7 +587,7 @@ impl DistanceEngine {
             })?;
 
             // Check alignment configuration compatibility
-            if legacy_cache.alignment_config != self.config {
+            if !same_alignment_params(&legacy_cache.alignment_config, &self.config) {
                 return Err(format!(
                     "Cache alignment config mismatch:\n  Cache: {:?}\n  Engine: {:?}",
                     legacy_cache.alignment_config, self.config
@@ -588,6 +634,14 @@ impl DistanceEngine {
         mode: DistanceMode,
     ) {
         let total_pairs = unique_pairs.len();
+
+        // Hamming mode is answered without alignments (see get_distance). It
+        // must never write placeholder statistics into the cache: a later
+        // SNP/InDel run would read them back as real alignment results.
+        if matches!(mode, DistanceMode::Hamming) {
+            println!("🎯 Hamming mode: no alignments needed ({total_pairs} allele pairs)");
+            return;
+        }
 
         // Filter out pairs already in cache (Strategy 1: Preventive filtering)
         let start_filter = Instant::now();
@@ -653,7 +707,7 @@ impl DistanceEngine {
         let results: Vec<_> = missing_pairs
             .into_par_iter()
             .filter_map(|(locus, crc1, crc2)| {
-                let alignment_result = self.compute_single_alignment(locus, *crc1, *crc2, mode);
+                let alignment_result = self.compute_single_alignment(locus, *crc1, *crc2);
 
                 // Increment and check if we should update progress
                 let completed =
@@ -674,6 +728,23 @@ impl DistanceEngine {
         // Store results in cache (and collect alignment detail rows for --save-alignments)
         for (locus, crc1, crc2, snps, indel_events, indel_bases, detail) in results {
             self.cache_distance(locus, crc1, crc2, snps, indel_events, indel_bases);
+            // Both sequences were just aligned, so the pair's length is known:
+            // record it now instead of relying on a later enrichment pass.
+            let len = self.sequence_db.as_ref().and_then(|db| {
+                let l1 = db.get_sequence(locus, crc1)?.sequence.len();
+                let l2 = db.get_sequence(locus, crc2)?.sequence.len();
+                Some(((l1 + l2) / 2) as u32)
+            });
+            if let Some(len) = len {
+                let key = DistanceCacheKey {
+                    locus: locus.clone(),
+                    crc1: crc1.min(crc2),
+                    crc2: crc1.max(crc2),
+                };
+                if let Some(e) = self.cache.get_mut(&key) {
+                    e.len = Some(len);
+                }
+            }
             if let Some(row) = detail {
                 self.alignment_details.push(row);
             }
@@ -702,15 +773,9 @@ impl DistanceEngine {
         locus: &str,
         crc1: u32,
         crc2: u32,
-        mode: DistanceMode,
     ) -> Option<(usize, usize, usize, Option<String>)> {
         if crc1 == crc2 {
             return Some((0, 0, 0, None)); // Identical alleles
-        }
-
-        // For Hamming mode, different CRCs = distance 1 (no sequence analysis needed)
-        if matches!(mode, DistanceMode::Hamming) {
-            return Some((1, 0, 0, None)); // Different CRC = 1 Hamming distance unit
         }
 
         // Try to get sequences and align (for non-Hamming modes)
@@ -1384,4 +1449,95 @@ pub fn calculate_distance_matrix(
     );
 
     matrix
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::SequenceInfo;
+
+    fn crc(s: &[u8]) -> u32 {
+        let mut h = crc32fast::Hasher::new();
+        h.update(s);
+        h.finalize()
+    }
+
+    fn engine_with(seqs: &[&[u8]]) -> (DistanceEngine, Vec<u32>) {
+        let mut db = SequenceDatabase::new();
+        let mut crcs = Vec::new();
+        for (i, s) in seqs.iter().enumerate() {
+            let c = crc(s);
+            crcs.push(c);
+            db.add_sequence(
+                "L1".to_string(),
+                c,
+                SequenceInfo {
+                    sequence: s.to_vec(),
+                    id: format!("L1_{i}"),
+                },
+            );
+        }
+        let e = DistanceEngine::with_sequences(AlignmentConfig::default(), db, "crc32".into());
+        (e, crcs)
+    }
+
+    const A: &[u8] = b"ACGTACGTACGTACGTACGT";
+    const B: &[u8] = b"ACGTACGAACGTACGTTCGT"; // 2 SNPs vs A
+
+    fn pairs(c: &[u32]) -> HashSet<(String, u32, u32)> {
+        [("L1".to_string(), c[0].min(c[1]), c[0].max(c[1]))].into()
+    }
+
+    #[test]
+    fn hamming_mode_never_writes_placeholders_into_cache() {
+        let (mut e, c) = engine_with(&[A, B]);
+        e.precompute_alignments(&pairs(&c), DistanceMode::Hamming);
+        assert_eq!(e.cache_stats().0, 0);
+        assert!(!e.has_new_entries());
+        assert_eq!(
+            e.get_distance("L1", c[0], c[1], DistanceMode::Hamming, true),
+            1
+        );
+
+        // A later SNP run must align instead of reading a Hamming placeholder.
+        e.precompute_alignments(&pairs(&c), DistanceMode::SnpsOnly);
+        assert_eq!(
+            e.get_distance("L1", c[0], c[1], DistanceMode::SnpsOnly, true),
+            2
+        );
+        assert_eq!(
+            e.get_distance("L1", c[0], c[1], DistanceMode::Hamming, true),
+            1
+        );
+    }
+
+    #[test]
+    fn computed_pairs_keep_lengths_through_save_and_load() {
+        let (mut e, c) = engine_with(&[A, B]);
+        e.precompute_alignments(&pairs(&c), DistanceMode::SnpsOnly);
+        assert!(e.has_recomb_data());
+        assert_eq!(e.locus_is_recombinant("L1", c[0], c[1], 0.05), Some(true));
+
+        let path = std::env::temp_dir().join(format!("cgdist_len_test_{}.lz4", std::process::id()));
+        let path = path.to_str().unwrap();
+        e.save_cache(path, DistanceMode::SnpsOnly).unwrap();
+        let (mut e2, _) = engine_with(&[A, B]);
+        e2.load_cache(path, DistanceMode::SnpsOnly).unwrap();
+        let _ = std::fs::remove_file(path);
+        assert!(e2.has_recomb_data());
+        assert_eq!(e2.locus_is_recombinant("L1", c[0], c[1], 0.05), Some(true));
+        assert_eq!(e2.locus_is_recombinant("L1", c[0], c[1], 0.2), Some(false));
+    }
+
+    #[test]
+    fn alignment_params_compared_numerically() {
+        let dna = AlignmentConfig::from_mode("dna").unwrap();
+        assert!(same_alignment_params(&dna, &AlignmentConfig::default()));
+        let strict = AlignmentConfig::from_mode("dna-strict").unwrap();
+        assert!(!same_alignment_params(&dna, &strict));
+        assert!(written_before_hamming_fix("0.1.3"));
+        assert!(written_before_hamming_fix("0.1.2-beta"));
+        assert!(!written_before_hamming_fix("0.1.4"));
+        assert!(!written_before_hamming_fix("0.2.0"));
+    }
 }

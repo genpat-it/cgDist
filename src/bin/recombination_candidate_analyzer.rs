@@ -492,6 +492,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✅ Loaded cache with {} entries", enriched_cache.data.len());
 
+    // Mutation density needs allele lengths. Without them every locus looks
+    // unflagged, which would silently report "no recombination".
+    let with_lengths = enriched_cache
+        .data
+        .values()
+        .filter(|v| v.seq1_length.is_some() && v.seq2_length.is_some())
+        .count();
+    if !enriched_cache.data.is_empty() && with_lengths == 0 {
+        return Err(
+            "the cache has no sequence lengths, so mutation density cannot be computed. \
+             Enrich it first: cgdist --schema <schema> --profiles <profiles> --output <out> \
+             --cache-file <cache> --enrich-lengths (caches written by cgdist <= 0.1.3 with \
+             --enrich-lengths on new pairs lost their lengths)"
+                .into(),
+        );
+    }
+    if with_lengths < enriched_cache.data.len() {
+        println!(
+            "⚠️  {} of {} cache entries have no sequence lengths and cannot be assessed",
+            enriched_cache.data.len() - with_lengths,
+            enriched_cache.data.len()
+        );
+    }
+
     // Initialize analyzer
     let mut analyzer = RecombinationAnalyzer::new(threshold, enriched_cache);
 
