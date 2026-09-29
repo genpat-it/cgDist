@@ -61,11 +61,16 @@ until the API stabilizes).
   alleles of a locus, given their hashes, with positions, bases and CIGAR.
   The alleles are aligned exactly as cgdist does, and the counts can be
   checked against a cache entry (`--cache-file`). Differences are annotated
-  at protein level (translation table 11, new module `core::protein`): SNP
-  effect (synonymous, missense, nonsense, stop/start lost, frame-disrupted)
-  with codon and protein change, and InDels as in-frame or frameshift. This
-  was checked against a Biopython-based classification on 28,766 real SNPs
-  with no differences.
+  at protein level (new modules `core::protein` and `core::codon_tables`):
+  any NCBI translation table (`--translation-table`, default 11; tables
+  generated from and checked against Biopython), an optional first-codon Met
+  rule (`--no-first-codon-as-met` turns it off), and Sequence Ontology effect
+  terms (synonymous_variant, missense_variant, stop_gained, stop_lost,
+  start_lost, stop/start_retained_variant, frameshift_variant,
+  inframe_insertion/deletion) with codon and protein change. Checked against
+  an independent Biopython-based classification (28,766 SNPs, table 11;
+  5,706 differences each for tables 11, 4, 1 and 2, with and without the
+  first-codon rule): no differences.
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).

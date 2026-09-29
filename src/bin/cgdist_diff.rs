@@ -9,7 +9,7 @@ use argh::FromArgs;
 use bio::io::fasta;
 use cgdist::core::alignment::{cigar_from_aligned, AlignmentConfig};
 use cgdist::core::distance::{align_pair_with_strings, ModernCache};
-use cgdist::core::protein::{self, SnpAnnotation, SnpEffect};
+use cgdist::core::protein::{self, GeneticCode, SnpAnnotation, SnpEffect};
 use std::path::Path;
 
 #[derive(FromArgs)]
@@ -61,6 +61,16 @@ struct Args {
     /// print the differences as TSV instead of text
     #[argh(switch)]
     tsv: bool,
+
+    /// NCBI translation table for the protein annotation (default: 11,
+    /// Bacterial, Archaeal and Plant Plastid)
+    #[argh(option, default = "11")]
+    translation_table: u32,
+
+    /// do not read an alternative start codon (e.g. GTG, TTG) as Met when it
+    /// is the first codon
+    #[argh(switch)]
+    no_first_codon_as_met: bool,
 }
 
 /// One difference between the two alleles.
@@ -233,22 +243,25 @@ fn run(args: Args) -> Result<i32, String> {
     let diffs = differences(aln.query.as_bytes(), aln.reference.as_bytes());
     let cigar = cigar_from_aligned(aln.query.as_bytes(), aln.reference.as_bytes());
 
-    // coding effects (translation table 11); positions in `Diff` are 1-based
+    // coding effects; positions in `Diff` are 1-based
+    let code = GeneticCode::new(args.translation_table, !args.no_first_codon_as_met)?;
     let map = protein::map_allele1_to_allele2(aln.query.as_bytes(), aln.reference.as_bytes());
     let snp_ann: Vec<Option<SnpAnnotation>> = diffs
         .iter()
         .map(|d| {
-            (d.kind == "SNP").then(|| protein::classify_snp(&s1, &s2, &map, d.a1.0 - 1, d.a2.0 - 1))
+            (d.kind == "SNP")
+                .then(|| protein::classify_snp(&code, &s1, &s2, &map, d.a1.0 - 1, d.a2.0 - 1))
         })
         .collect();
     let effect_of = |i: usize| -> String {
         let d = &diffs[i];
         match &snp_ann[i] {
             Some(a) => a.effect.label().to_string(),
-            None => protein::indel_effect(d.bases1.len().max(d.bases2.len())).to_string(),
+            None => protein::indel_effect(d.bases1.len().max(d.bases2.len()), d.kind == "INS")
+                .to_string(),
         }
     };
-    let (prot1, prot2) = (protein::translate(&s1), protein::translate(&s2));
+    let (prot1, prot2) = (code.translate(&s1), code.translate(&s2));
 
     if args.tsv {
         println!("type\tevent\tallele1_start\tallele1_end\tallele2_start\tallele2_end\tallele1_bases\tallele2_bases\teffect\tcodon1\tcodon2\tprotein_change");
@@ -303,19 +316,37 @@ fn run(args: Args) -> Result<i32, String> {
             "           bases only in allele 2 (INS): {ins}   bases only in allele 1 (DEL): {del}"
         );
         let count = |e: SnpEffect| snp_ann.iter().flatten().filter(|a| a.effect == e).count();
+        let syn = snp_ann
+            .iter()
+            .flatten()
+            .filter(|a| a.effect.is_synonymous())
+            .count();
         let nonsyn = snp_ann
             .iter()
             .flatten()
             .filter(|a| a.effect.is_nonsynonymous())
             .count();
         println!(
-            "coding     synonymous={}  nonsynonymous={} (missense={} nonsense={} stop_lost={} start_lost={})  frame_disrupted={}",
+            "code       NCBI table {} ({}), first codon as Met: {}",
+            code.table_id(),
+            code.table_name(),
+            if code.first_codon_as_met { "yes" } else { "no" }
+        );
+        println!(
+            "coding     synonymous={syn} (synonymous_variant={} stop_retained_variant={} start_retained_variant={})",
             count(SnpEffect::Synonymous),
-            nonsyn,
+            count(SnpEffect::StopRetained),
+            count(SnpEffect::StartRetained)
+        );
+        println!(
+            "           nonsynonymous={nonsyn} (missense_variant={} stop_gained={} stop_lost={} start_lost={})",
             count(SnpEffect::Missense),
-            count(SnpEffect::Nonsense),
+            count(SnpEffect::StopGained),
             count(SnpEffect::StopLost),
-            count(SnpEffect::StartLost),
+            count(SnpEffect::StartLost)
+        );
+        println!(
+            "           frame-disrupted (coding_sequence_variant)={}",
             count(SnpEffect::FrameDisrupted)
         );
         println!(

@@ -1,15 +1,13 @@
-// protein.rs - Coding effect of allele differences (translation table 11)
+// protein.rs - Coding effect of allele differences (any NCBI genetic code)
 //
 // cgMLST alleles (chewBBACA) are complete coding sequences in frame: length
 // a multiple of 3, a start codon, a stop codon at the end. This module
-// translates them with the bacterial/archaeal/plant-plastid code (NCBI
-// translation table 11) and classifies each difference found by an alignment:
+// translates them with a configurable NCBI translation table (default 11,
+// bacterial) and classifies each difference found by an alignment:
 // SNPs by the change of the whole codon they fall in, InDels as in-frame or
 // frameshift. It only annotates; no distance or cache value depends on it.
 
-/// Start codons of translation table 11. At the first codon they are
-/// translated as Met.
-const STARTS_11: [&[u8; 3]; 7] = [b"ATG", b"GTG", b"TTG", b"CTG", b"ATT", b"ATC", b"ATA"];
+use crate::core::codon_tables::{self, CodonTableDef};
 
 fn base_index(b: u8) -> Option<usize> {
     match b.to_ascii_uppercase() {
@@ -21,43 +19,98 @@ fn base_index(b: u8) -> Option<usize> {
     }
 }
 
-/// Standard codon table (identical amino acids in table 11), indexed by
-/// TCAG order: first base * 16 + second * 4 + third.
-const CODE: &[u8; 64] = b"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG";
+/// A genetic code: an NCBI translation table plus the initiation rule.
+#[derive(Clone, Copy)]
+pub struct GeneticCode {
+    table: &'static CodonTableDef,
+    /// Translate the first codon as Met when it is a start codon of the
+    /// table (as translation does at initiation: GTG/TTG start -> Met).
+    pub first_codon_as_met: bool,
+}
 
-/// Amino acid of a codon ('X' if it has a non-ACGT base). `first` applies
-/// the initiation rule: any table-11 start codon is Met.
-pub fn translate_codon(codon: &[u8], first: bool) -> u8 {
-    if codon.len() != 3 {
-        return b'X';
-    }
-    if first {
-        let up = [
-            codon[0].to_ascii_uppercase(),
-            codon[1].to_ascii_uppercase(),
-            codon[2].to_ascii_uppercase(),
-        ];
-        if STARTS_11.iter().any(|s| **s == up) {
-            return b'M';
-        }
-    }
-    match (
-        base_index(codon[0]),
-        base_index(codon[1]),
-        base_index(codon[2]),
-    ) {
-        (Some(a), Some(b), Some(c)) => CODE[a * 16 + b * 4 + c],
-        _ => b'X',
+impl std::fmt::Debug for GeneticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GeneticCode({} {})", self.table.id, self.table.name)
     }
 }
 
-/// Protein of a coding sequence (table 11, first codon as initiator).
-/// A trailing incomplete codon is ignored.
+impl Default for GeneticCode {
+    /// NCBI table 11 (Bacterial, Archaeal and Plant Plastid), first codon Met.
+    fn default() -> Self {
+        Self::new(11, true).expect("table 11 exists")
+    }
+}
+
+impl GeneticCode {
+    pub fn new(table_id: u32, first_codon_as_met: bool) -> Result<Self, String> {
+        let table = codon_tables::table(table_id).ok_or_else(|| {
+            let ids: Vec<String> = codon_tables::TABLES
+                .iter()
+                .map(|t| t.id.to_string())
+                .collect();
+            format!(
+                "unknown translation table {table_id} (available: {})",
+                ids.join(", ")
+            )
+        })?;
+        Ok(Self {
+            table,
+            first_codon_as_met,
+        })
+    }
+
+    pub fn table_id(&self) -> u32 {
+        self.table.id
+    }
+
+    pub fn table_name(&self) -> &'static str {
+        self.table.name
+    }
+
+    fn index(codon: &[u8]) -> Option<usize> {
+        if codon.len() != 3 {
+            return None;
+        }
+        Some(base_index(codon[0])? * 16 + base_index(codon[1])? * 4 + base_index(codon[2])?)
+    }
+
+    /// Whether a codon is an initiation codon of this table.
+    pub fn is_start(&self, codon: &[u8]) -> bool {
+        Self::index(codon).is_some_and(|i| self.table.starts[i] == b'M')
+    }
+
+    /// Amino acid of a codon ('*' stop, 'X' if it has a non-ACGT base).
+    /// `first` applies the initiation rule to the first codon of a CDS.
+    pub fn translate_codon(&self, codon: &[u8], first: bool) -> u8 {
+        match Self::index(codon) {
+            None => b'X',
+            Some(i) => {
+                if first && self.first_codon_as_met && self.table.starts[i] == b'M' {
+                    b'M'
+                } else {
+                    self.table.aa[i]
+                }
+            }
+        }
+    }
+
+    /// Protein of a coding sequence; a trailing incomplete codon is ignored.
+    pub fn translate(&self, cds: &[u8]) -> Vec<u8> {
+        cds.chunks_exact(3)
+            .enumerate()
+            .map(|(i, c)| self.translate_codon(c, i == 0))
+            .collect()
+    }
+}
+
+/// Amino acid of a codon with the default code (table 11, first codon Met).
+pub fn translate_codon(codon: &[u8], first: bool) -> u8 {
+    GeneticCode::default().translate_codon(codon, first)
+}
+
+/// Protein of a CDS with the default code (table 11, first codon Met).
 pub fn translate(cds: &[u8]) -> Vec<u8> {
-    cds.chunks_exact(3)
-        .enumerate()
-        .map(|(i, c)| translate_codon(c, i == 0))
-        .collect()
+    GeneticCode::default().translate(cds)
 }
 
 pub fn aa_name(aa: u8) -> &'static str {
@@ -87,41 +140,62 @@ pub fn aa_name(aa: u8) -> &'static str {
     }
 }
 
-/// Effect of a SNP on the protein.
+/// Effect of a SNP on the protein, as Sequence Ontology consequence terms
+/// (the vocabulary of snpEff, Ensembl VEP and bcftools csq).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnpEffect {
-    /// same amino acid
+    /// same amino acid (SO:0001819 synonymous_variant)
     Synonymous,
-    /// different amino acid
+    /// stop codon changed to another stop (SO:0001567 stop_retained_variant)
+    StopRetained,
+    /// initiator codon changed to another start codon (SO:0002019
+    /// start_retained_variant)
+    StartRetained,
+    /// different amino acid (SO:0001583 missense_variant)
     Missense,
-    /// amino acid -> stop (premature stop codon)
-    Nonsense,
-    /// stop -> amino acid
+    /// amino acid -> stop (SO:0001587 stop_gained)
+    StopGained,
+    /// stop -> amino acid (SO:0001578 stop_lost)
     StopLost,
-    /// the initiator codon is no longer a start codon
+    /// initiator codon no longer a start codon (SO:0002012 start_lost)
     StartLost,
-    /// the codon is shifted or split by an InDel: no codon-to-codon comparison
+    /// the codon is shifted or split by an InDel, so no codon-to-codon
+    /// comparison is possible (SO:0001580 coding_sequence_variant)
     FrameDisrupted,
 }
 
 impl SnpEffect {
+    /// Sequence Ontology term.
     pub fn label(self) -> &'static str {
         match self {
-            SnpEffect::Synonymous => "synonymous",
-            SnpEffect::Missense => "missense",
-            SnpEffect::Nonsense => "nonsense",
+            SnpEffect::Synonymous => "synonymous_variant",
+            SnpEffect::StopRetained => "stop_retained_variant",
+            SnpEffect::StartRetained => "start_retained_variant",
+            SnpEffect::Missense => "missense_variant",
+            SnpEffect::StopGained => "stop_gained",
             SnpEffect::StopLost => "stop_lost",
             SnpEffect::StartLost => "start_lost",
-            SnpEffect::FrameDisrupted => "frame_disrupted",
+            SnpEffect::FrameDisrupted => "coding_sequence_variant",
         }
     }
 
-    /// Changes the encoded protein (everything except synonymous and
-    /// frame-disrupted, which is not classifiable at codon level).
+    /// The encoded amino acid is unchanged.
+    pub fn is_synonymous(self) -> bool {
+        matches!(
+            self,
+            SnpEffect::Synonymous | SnpEffect::StopRetained | SnpEffect::StartRetained
+        )
+    }
+
+    /// The encoded protein changes (missense, stop gained/lost, start lost).
+    /// Frame-disrupted SNPs are in neither class.
     pub fn is_nonsynonymous(self) -> bool {
         matches!(
             self,
-            SnpEffect::Missense | SnpEffect::Nonsense | SnpEffect::StopLost | SnpEffect::StartLost
+            SnpEffect::Missense
+                | SnpEffect::StopGained
+                | SnpEffect::StopLost
+                | SnpEffect::StartLost
         )
     }
 }
@@ -184,6 +258,7 @@ pub fn map_allele1_to_allele2(query_aln: &[u8], ref_aln: &[u8]) -> Vec<Option<us
 /// phase, to one codon of allele 2; otherwise the SNP is FrameDisrupted.
 /// Several SNPs in one codon all receive that codon's effect.
 pub fn classify_snp(
+    code: &GeneticCode,
     seq1: &[u8],
     seq2: &[u8],
     map: &[Option<usize>],
@@ -202,17 +277,22 @@ pub fn classify_snp(
     };
     let (cs1, cs2) = (codon(seq1, c1), codon(seq2, c2));
     let (aa1, aa2) = (
-        translate_codon(cs1.as_bytes(), c1 == 0),
-        translate_codon(cs2.as_bytes(), c2 == 0),
+        code.translate_codon(cs1.as_bytes(), c1 == 0),
+        code.translate_codon(cs2.as_bytes(), c2 == 0),
     );
+    let initiator = c1 == 0 && c2 == 0 && code.is_start(cs1.as_bytes());
     let effect = if !aligned {
         SnpEffect::FrameDisrupted
-    } else if c1 == 0 && aa1 == b'M' && aa2 != b'M' {
+    } else if initiator && !code.is_start(cs2.as_bytes()) {
         SnpEffect::StartLost
+    } else if initiator {
+        SnpEffect::StartRetained
+    } else if aa1 == aa2 && aa1 == b'*' {
+        SnpEffect::StopRetained
     } else if aa1 == aa2 {
         SnpEffect::Synonymous
     } else if aa2 == b'*' {
-        SnpEffect::Nonsense
+        SnpEffect::StopGained
     } else if aa1 == b'*' {
         SnpEffect::StopLost
     } else {
@@ -229,12 +309,13 @@ pub fn classify_snp(
     }
 }
 
-/// Effect of an InDel run of `len` bases.
-pub fn indel_effect(len: usize) -> &'static str {
-    if len.is_multiple_of(3) {
-        "in_frame"
-    } else {
-        "frameshift"
+/// Sequence Ontology term of an InDel run of `len` bases; `insertion` is
+/// relative to allele 1 (bases present only in allele 2).
+pub fn indel_effect(len: usize, insertion: bool) -> &'static str {
+    match (len.is_multiple_of(3), insertion) {
+        (false, _) => "frameshift_variant",
+        (true, true) => "inframe_insertion",
+        (true, false) => "inframe_deletion",
     }
 }
 
@@ -251,61 +332,82 @@ mod tests {
         assert_eq!(translate(b"ATTATTTAG"), b"MI*");
         assert_eq!(translate_codon(b"NNN", false), b'X');
         assert_eq!(aa_name(b'*'), "Ter");
+        let no_met = GeneticCode::new(11, false).unwrap();
+        assert_eq!(no_met.translate(b"GTGGTGTAA"), b"VV*");
+    }
+
+    #[test]
+    fn other_tables() {
+        // table 4 (Mycoplasma): TGA = Trp
+        assert_eq!(
+            GeneticCode::new(4, true).unwrap().translate(b"ATGTGATAA"),
+            b"MW*"
+        );
+        // table 1: TGA = stop
+        assert_eq!(
+            GeneticCode::new(1, true).unwrap().translate(b"ATGTGATAA"),
+            b"M**"
+        );
+        assert!(GeneticCode::new(7, true).is_err());
     }
 
     fn classify(a: &[u8], b: &[u8], p: usize) -> SnpAnnotation {
         let map = map_allele1_to_allele2(a, b);
-        classify_snp(a, b, &map, p, p)
+        classify_snp(&GeneticCode::default(), a, b, &map, p, p)
     }
 
     #[test]
     fn snp_effects() {
-        // GGA (Gly) -> GGG (Gly)
         let s = classify(b"ATGGGATAA", b"ATGGGGTAA", 5);
         assert_eq!(
             (s.effect, s.protein_change().as_str()),
             (SnpEffect::Synonymous, "p.Gly2=")
         );
-        // GGA (Gly) -> AGA (Arg)
         let s = classify(b"ATGGGATAA", b"ATGAGATAA", 3);
         assert_eq!(
             (s.effect, s.protein_change().as_str()),
             (SnpEffect::Missense, "p.Gly2Arg")
         );
-        // TGG (Trp) -> TGA (stop)
         assert_eq!(
             classify(b"ATGTGGTAA", b"ATGTGATAA", 5).effect,
-            SnpEffect::Nonsense
+            SnpEffect::StopGained
         );
-        // TAA (stop) -> CAA (Gln)
         assert_eq!(
             classify(b"ATGGGATAA", b"ATGGGACAA", 6).effect,
             SnpEffect::StopLost
         );
-        // ATG -> ACG: no longer a start codon
+        assert_eq!(
+            classify(b"ATGGGATAA", b"ATGGGATAG", 8).effect,
+            SnpEffect::StopRetained
+        );
         assert_eq!(
             classify(b"ATGGGATAA", b"ACGGGATAA", 1).effect,
             SnpEffect::StartLost
         );
-        // ATG -> GTG: still a (table 11) start codon, Met
+        // ATG -> GTG: still a (table 11) start codon
         assert_eq!(
             classify(b"ATGGGATAA", b"GTGGGATAA", 0).effect,
-            SnpEffect::Synonymous
+            SnpEffect::StartRetained
+        );
+        assert!(SnpEffect::StartRetained.is_synonymous());
+        assert!(SnpEffect::StopGained.is_nonsynonymous());
+        assert!(
+            !SnpEffect::FrameDisrupted.is_synonymous()
+                && !SnpEffect::FrameDisrupted.is_nonsynonymous()
         );
     }
 
     #[test]
     fn shifted_codons_are_frame_disrupted() {
-        // allele 2 has one extra base before the SNP: codons are shifted
         let a = b"ATGGGA-CCATAA";
         let b = b"ATGGGATCGATAA";
         let seq1: Vec<u8> = a.iter().copied().filter(|&c| c != b'-').collect();
-        let seq2: Vec<u8> = b.to_vec();
         let map = map_allele1_to_allele2(a, b);
-        // SNP at alignment column 8: allele1 base 7 (C), allele2 base 8 (G)
-        let s = classify_snp(&seq1, &seq2, &map, 7, 8);
+        let s = classify_snp(&GeneticCode::default(), &seq1, b, &map, 7, 8);
         assert_eq!(s.effect, SnpEffect::FrameDisrupted);
-        assert_eq!(indel_effect(1), "frameshift");
-        assert_eq!(indel_effect(6), "in_frame");
+        assert_eq!(s.effect.label(), "coding_sequence_variant");
+        assert_eq!(indel_effect(1, true), "frameshift_variant");
+        assert_eq!(indel_effect(6, true), "inframe_insertion");
+        assert_eq!(indel_effect(3, false), "inframe_deletion");
     }
 }

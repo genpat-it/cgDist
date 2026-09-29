@@ -485,18 +485,29 @@ cache      snps=36  indel_events=1  indel_bases=3  -> MATCH
 Allele 1 is the one with the smaller hash, as in the cache. `INS`/`DEL` are
 relative to allele 1.
 
-Each difference is also annotated at protein level, using translation table
-11, with the first codon read as Met:
+Each difference is also annotated at protein level. The genetic code is
+configurable: `--translation-table <N>` accepts any NCBI table (default 11,
+Bacterial), and `--no-first-codon-as-met` stops an alternative start codon
+(GTG, TTG, ...) from being read as Met at position 1. Effects use
+[Sequence Ontology](http://www.sequenceontology.org/) terms, the vocabulary
+of snpEff, Ensembl VEP and bcftools csq:
 
-* each SNP gets its codon and effect: `synonymous`, `missense`, `nonsense`,
-  `stop_lost`, `start_lost`, or `frame_disrupted` when an InDel shifts or
-  splits the codon. The protein change is numbered on allele 1, e.g.
-  `p.Glu243Asp`;
-* each InDel is marked `in_frame` or `frameshift`;
-* a summary gives the synonymous/nonsynonymous counts and says whether the
-  two proteins are identical. `--tsv` prints the same list as a table, and
-`--cache-file` checks the counts against the cache entry (exit code 2 on a
-mismatch).
+| term | meaning |
+|------|---------|
+| `synonymous_variant` | same amino acid |
+| `stop_retained_variant` | stop codon changed to another stop |
+| `start_retained_variant` | initiator codon changed to another start codon |
+| `missense_variant` | different amino acid |
+| `stop_gained` / `stop_lost` | premature stop / stop codon lost |
+| `start_lost` | initiator codon no longer a start codon |
+| `coding_sequence_variant` | SNP in a codon shifted or split by an InDel (not comparable codon-to-codon) |
+| `frameshift_variant`, `inframe_insertion`, `inframe_deletion` | InDels |
+
+SNPs are classified by the change of the whole codon in both alleles, so
+several SNPs in one codon are evaluated together (haplotype-aware, as in
+bcftools csq). Protein changes are numbered on allele 1 (`p.Glu243Asp`,
+`p.Arg8=`). The summary counts synonymous and nonsynonymous SNPs and says
+whether the two proteins are identical.
 
 ## 🧬 Recombination-Candidate Flagging
 

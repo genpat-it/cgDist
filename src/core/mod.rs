@@ -2,6 +2,7 @@
 
 pub mod alignment;
 pub mod banded;
+pub mod codon_tables;
 pub mod distance;
 pub mod protein;
 // pub mod recombination; // Disabled - pluggable system not needed for now
