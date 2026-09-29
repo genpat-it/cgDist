@@ -237,6 +237,33 @@ fn main() {
         .collect(),
     };
     for name in names.iter().map(String::as_str) {
+        if name == "cigar" {
+            // band strings -> CIGAR vs parasail get_cigar, all pairs
+            let bad = pairs
+                .par_iter()
+                .filter(|p| {
+                    match cgdist::core::banded::align_certified_with_strings(&p.q, &p.r, &SC, 0.5) {
+                        None => false,
+                        Some((_, st)) => {
+                            let got = cgdist::core::alignment::cigar_from_aligned(
+                                &st.query,
+                                &st.reference,
+                            );
+                            // keep the aligner alive: the result points to its matrix
+                            let aligner = build(None, "striped");
+                            let res = aligner.align(Some(&p.q), &p.r).unwrap();
+                            let want = res.get_cigar(&p.q, &p.r).unwrap();
+                            let tb = res.get_traceback_strings(&p.q, &p.r).unwrap();
+                            got != want
+                                || st.query != tb.query.as_bytes()
+                                || st.reference != tb.reference.as_bytes()
+                        }
+                    }
+                })
+                .count();
+            println!("cigar+strings vs parasail: WRONG {bad}/{}", pairs.len());
+            continue;
+        }
         if name == "banded" {
             run_banded(&pairs, tp, base);
             continue;

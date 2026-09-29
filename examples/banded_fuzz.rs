@@ -7,8 +7,8 @@
 //
 //   cargo run --release --example banded_fuzz -- [cases] [seed]
 
-use cgdist::core::alignment::compute_alignment_stats;
-use cgdist::core::banded::{align_certified, Scoring};
+use cgdist::core::alignment::{cigar_from_aligned, compute_alignment_stats};
+use cgdist::core::banded::{align_certified_with_strings, Scoring};
 use parasail_rs::{Aligner, Matrix};
 use rayon::prelude::*;
 
@@ -101,7 +101,11 @@ fn mutate(rng: &mut Rng, s: &[u8], rate_pm: u64) -> Vec<u8> {
     out
 }
 
-fn reference(q: &[u8], r: &[u8], sc: &Scoring) -> ((usize, usize, usize), i32) {
+fn reference(
+    q: &[u8],
+    r: &[u8],
+    sc: &Scoring,
+) -> ((usize, usize, usize), i32, String, String, String) {
     let m = Matrix::create(b"ACGT", sc.match_score, sc.mismatch).unwrap();
     let a = Aligner::new()
         .matrix(m)
@@ -112,9 +116,13 @@ fn reference(q: &[u8], r: &[u8], sc: &Scoring) -> ((usize, usize, usize), i32) {
         .build(); // striped, saturating: the original production kernel
     let res = a.align(Some(q), r).unwrap();
     let tb = res.get_traceback_strings(q, r).unwrap();
+    let cigar = res.get_cigar(q, r).unwrap();
     (
         compute_alignment_stats(&tb.query, &tb.reference),
         res.get_score(),
+        tb.query,
+        tb.reference,
+        cigar,
     )
 }
 
@@ -193,11 +201,18 @@ fn main() {
             };
             let (q, r) = if rng.chance(500) { (a, b) } else { (b, a) };
             let fraction = if rng.chance(100) { 1.0 } else { 0.5 };
-            match align_certified(&q, &r, &sc, fraction) {
+            match align_certified_with_strings(&q, &r, &sc, fraction) {
                 None => (preset, false, true),
-                Some(res) => {
-                    let got = ((res.snps, res.indel_events, res.indel_bases), res.score);
-                    let want = reference(&q, &r, &sc);
+                Some((res, st)) => {
+                    let (ws, wsc, wq, wr, wc) = reference(&q, &r, &sc);
+                    let got = (
+                        (res.snps, res.indel_events, res.indel_bases),
+                        res.score,
+                        String::from_utf8_lossy(&st.query).into_owned(),
+                        String::from_utf8_lossy(&st.reference).into_owned(),
+                        cigar_from_aligned(&st.query, &st.reference),
+                    );
+                    let want = (ws, wsc, wq, wr, wc);
                     if got != want {
                         eprintln!(
                             "MISMATCH preset={} lens={}/{} got={:?} want={:?}\nq={}\nr={}",

@@ -1,6 +1,8 @@
 // distance.rs - Core distance calculation engine
 
-use crate::core::alignment::{compute_alignment_stats, AlignmentConfig, DistanceMode};
+use crate::core::alignment::{
+    cigar_from_aligned, compute_alignment_stats, AlignmentConfig, DistanceMode,
+};
 use crate::core::banded::{align_certified, align_certified_with_strings, Scoring};
 use crate::data::{AllelicProfile, SequenceDatabase};
 use crate::hashers::{AlleleHasher, HasherRegistry};
@@ -38,6 +40,88 @@ impl CacheEntry {
     }
 }
 
+/// A TSV output written row by row as alignments are produced
+/// (--save-alignments, --save-cigar). The file is created, with its header,
+/// on the first row or at `finish`, so it exists even when no row is written.
+struct RowWriter {
+    path: String,
+    header: &'static str,
+    out: Option<std::io::BufWriter<std::fs::File>>,
+    rows: usize,
+    error: Option<String>,
+}
+
+impl RowWriter {
+    fn new(path: String, header: &'static str) -> Self {
+        Self {
+            path,
+            header,
+            out: None,
+            rows: 0,
+            error: None,
+        }
+    }
+
+    fn open(&mut self) {
+        use std::io::Write;
+        match std::fs::File::create(&self.path) {
+            Ok(f) => {
+                let mut w = std::io::BufWriter::with_capacity(1 << 20, f);
+                match writeln!(w, "{}", self.header) {
+                    Ok(()) => self.out = Some(w),
+                    Err(e) => self.error = Some(format!("Failed to write {}: {e}", self.path)),
+                }
+            }
+            Err(e) => self.error = Some(format!("Failed to write {}: {e}", self.path)),
+        }
+    }
+
+    /// Append a row; a write error is kept, reported by `finish`, and later
+    /// rows are skipped.
+    fn write(&mut self, row: &str) {
+        use std::io::Write;
+        if self.error.is_some() {
+            return;
+        }
+        if self.out.is_none() {
+            self.open();
+        }
+        if let Some(w) = self.out.as_mut() {
+            match writeln!(w, "{row}") {
+                Ok(()) => self.rows += 1,
+                Err(e) => self.error = Some(format!("Failed to write {}: {e}", self.path)),
+            }
+        }
+    }
+
+    /// Flush and close; returns the number of rows written.
+    fn finish(&mut self) -> Result<usize, String> {
+        use std::io::Write;
+        if self.out.is_none() && self.error.is_none() {
+            self.open();
+        }
+        if let Some(mut w) = self.out.take() {
+            if let Err(e) = w.flush() {
+                self.error
+                    .get_or_insert(format!("Failed to write {}: {e}", self.path));
+            }
+        }
+        match self.error.take() {
+            Some(e) => Err(e),
+            None => Ok(self.rows),
+        }
+    }
+}
+
+/// Per-pair output rows produced alongside the statistics.
+#[derive(Default)]
+struct PairDetail {
+    /// --save-alignments row
+    full: Option<String>,
+    /// --save-cigar row
+    cigar: Option<String>,
+}
+
 /// Distance calculation engine
 pub struct DistanceEngine {
     cache: HashMap<DistanceCacheKey, CacheEntry>,
@@ -50,11 +134,9 @@ pub struct DistanceEngine {
     save_alignments_path: Option<String>,
     // Fraction of new alignments re-checked against parasail's original kernel
     verify_fraction: f64,
-    // --save-alignments output, opened on the first row and written as rows
-    // are produced
-    alignment_writer: Option<std::io::BufWriter<std::fs::File>>,
-    alignment_rows: usize,
-    alignment_error: Option<String>,
+    // --save-alignments / --save-cigar outputs, written as rows are produced
+    alignments_out: Option<RowWriter>,
+    cigar_out: Option<RowWriter>,
 }
 
 /// Modern cache structure supporting any hasher type
@@ -298,9 +380,8 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
-            alignment_writer: None,
-            alignment_rows: 0,
-            alignment_error: None,
+            alignments_out: None,
+            cigar_out: None,
         }
     }
 
@@ -318,9 +399,8 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
-            alignment_writer: None,
-            alignment_rows: 0,
-            alignment_error: None,
+            alignments_out: None,
+            cigar_out: None,
         }
     }
 
@@ -889,7 +969,7 @@ impl DistanceEngine {
         // With --save-alignments the pairs are processed in chunks whose rows
         // are written out right away (same rows, same order), so memory does
         // not grow with the number of saved alignments.
-        let chunk_size = if self.save_alignments_path.is_some() {
+        let chunk_size = if self.wants_details() {
             20_000
         } else {
             missing_pairs.len().max(1)
@@ -904,7 +984,7 @@ impl DistanceEngine {
                     usize,
                     usize,
                     (Option<u32>, Option<u32>),
-                    Option<String>,
+                    Option<PairDetail>,
                 )>,
             )> = chunk
                 .par_iter()
@@ -956,8 +1036,13 @@ impl DistanceEngine {
                             },
                         );
                         self.has_new_entries = true;
-                        if let Some(row) = detail {
-                            self.write_alignment_row(&row);
+                        if let Some(d) = detail {
+                            if let (Some(row), Some(w)) = (d.full, self.alignments_out.as_mut()) {
+                                w.write(&row);
+                            }
+                            if let (Some(row), Some(w)) = (d.cigar, self.cigar_out.as_mut()) {
+                                w.write(&row);
+                            }
                         }
                     }
                     None => unaligned.push(pair),
@@ -1043,7 +1128,7 @@ impl DistanceEngine {
         locus: &str,
         crc1: u32,
         crc2: u32,
-    ) -> Option<(usize, usize, usize, Option<String>)> {
+    ) -> Option<(usize, usize, usize, Option<PairDetail>)> {
         let result = self.compute_single_alignment_inner(locus, crc1, crc2);
         if self.verify_fraction > 0.0
             && crc1 != crc2
@@ -1078,7 +1163,7 @@ impl DistanceEngine {
         locus: &str,
         crc1: u32,
         crc2: u32,
-    ) -> Option<(usize, usize, usize, Option<String>)> {
+    ) -> Option<(usize, usize, usize, Option<PairDetail>)> {
         if crc1 == crc2 {
             return Some((0, 0, 0, None)); // Identical alleles
         }
@@ -1100,17 +1185,18 @@ impl DistanceEngine {
                         gap_open: self.config.gap_open,
                         gap_extend: self.config.gap_extend,
                     };
-                    if self.save_alignments_path.is_none() {
+                    if !self.wants_details() {
                         if let Some(b) =
                             align_certified(&seq1.sequence, &seq2.sequence, &scoring, 0.5)
                         {
                             return Some((b.snps, b.indel_events, b.indel_bases, None));
                         }
                     } else if seq1.sequence.is_ascii() && seq2.sequence.is_ascii() {
-                        // --save-alignments: the band's traceback yields the
-                        // same gapped strings as parasail's (ASCII only: the
-                        // parasail binding requires UTF-8). Statistics and the
-                        // row are then built exactly as on the parasail path.
+                        // --save-alignments / --save-cigar: the band's
+                        // traceback yields the same gapped strings as
+                        // parasail's (ASCII only: the parasail binding
+                        // requires UTF-8). Statistics and rows are then built
+                        // exactly as on the parasail path.
                         if let Some((b, st)) = align_certified_with_strings(
                             &seq1.sequence,
                             &seq2.sequence,
@@ -1119,17 +1205,19 @@ impl DistanceEngine {
                         ) {
                             let query = String::from_utf8_lossy(&st.query);
                             let reference = String::from_utf8_lossy(&st.reference);
-                            let (snps, indel_events, indel_bases) =
-                                compute_alignment_stats(&query, &reference);
-                            let detail = format!(
-                                "{locus}\t{crc1}\t{crc2}\t{}\t{}\t{}\t{}\t{snps}\t{indel_events}\t{indel_bases}\t{:.2}",
-                                String::from_utf8_lossy(&seq1.sequence),
-                                String::from_utf8_lossy(&seq2.sequence),
-                                query,
-                                reference,
-                                b.score as f32,
+                            let stats = compute_alignment_stats(&query, &reference);
+                            let detail = self.pair_detail(
+                                locus,
+                                crc1,
+                                crc2,
+                                &seq1.sequence,
+                                &seq2.sequence,
+                                &query,
+                                &reference,
+                                stats,
+                                b.score,
                             );
-                            return Some((snps, indel_events, indel_bases, Some(detail)));
+                            return Some((stats.0, stats.1, stats.2, Some(detail)));
                         }
                     }
                 }
@@ -1150,18 +1238,19 @@ impl DistanceEngine {
                                 // --save-alignments is active. Reading self here is
                                 // fine in the parallel context; the row is returned and
                                 // collected by the caller (which holds &mut self).
-                                let detail = if self.save_alignments_path.is_some() {
-                                    Some(format!(
-                                        "{locus}\t{crc1}\t{crc2}\t{}\t{}\t{}\t{}\t{snps}\t{indel_events}\t{indel_bases}\t{:.2}",
-                                        String::from_utf8_lossy(&seq1.sequence),
-                                        String::from_utf8_lossy(&seq2.sequence),
-                                        traceback.query,
-                                        traceback.reference,
-                                        result.get_score() as f32,
-                                    ))
-                                } else {
-                                    None
-                                };
+                                let detail = self.wants_details().then(|| {
+                                    self.pair_detail(
+                                        locus,
+                                        crc1,
+                                        crc2,
+                                        &seq1.sequence,
+                                        &seq2.sequence,
+                                        &traceback.query,
+                                        &traceback.reference,
+                                        (snps, indel_events, indel_bases),
+                                        result.get_score(),
+                                    )
+                                });
 
                                 return Some((snps, indel_events, indel_bases, detail));
                             }
@@ -1505,80 +1594,83 @@ impl DistanceEngine {
     }
 
     pub fn set_save_alignments(&mut self, path: String) {
-        self.save_alignments_path = Some(path);
-        self.alignment_writer = None;
-        self.alignment_rows = 0;
-        self.alignment_error = None;
+        self.save_alignments_path = Some(path.clone());
+        self.alignments_out = Some(RowWriter::new(path, ALIGNMENTS_HEADER));
     }
 
-    const ALIGNMENTS_HEADER: &'static str = "locus\thash1\thash2\tseq1\tseq2\taligned_seq1\taligned_seq2\tsnps\tindel_events\tindel_bases\talignment_score";
+    /// Also write one CIGAR row per aligned pair (--save-cigar).
+    pub fn set_save_cigar(&mut self, path: String) {
+        self.cigar_out = Some(RowWriter::new(path, CIGAR_HEADER));
+    }
 
-    /// Create the --save-alignments file and write its header.
-    fn open_alignments(&mut self) {
-        use std::io::Write;
-        let Some(path) = &self.save_alignments_path else {
-            return;
-        };
-        match std::fs::File::create(path) {
-            Ok(f) => {
-                let mut w = std::io::BufWriter::with_capacity(1 << 20, f);
-                if let Err(e) = writeln!(w, "{}", Self::ALIGNMENTS_HEADER) {
-                    self.alignment_error = Some(format!("Failed to write alignments file: {e}"));
-                } else {
-                    self.alignment_writer = Some(w);
-                }
-            }
-            Err(e) => self.alignment_error = Some(format!("Failed to write alignments file: {e}")),
+    /// Whether per-pair output rows (gapped strings / CIGAR) are requested.
+    fn wants_details(&self) -> bool {
+        self.alignments_out.is_some() || self.cigar_out.is_some()
+    }
+
+    /// Build the requested output rows for one aligned pair.
+    #[allow(clippy::too_many_arguments)]
+    fn pair_detail(
+        &self,
+        locus: &str,
+        crc1: u32,
+        crc2: u32,
+        seq1: &[u8],
+        seq2: &[u8],
+        query: &str,
+        reference: &str,
+        stats: (usize, usize, usize),
+        score: i32,
+    ) -> PairDetail {
+        let (snps, indel_events, indel_bases) = stats;
+        PairDetail {
+            full: self.alignments_out.as_ref().map(|_| {
+                format!(
+                    "{locus}\t{crc1}\t{crc2}\t{}\t{}\t{}\t{}\t{snps}\t{indel_events}\t{indel_bases}\t{:.2}",
+                    String::from_utf8_lossy(seq1),
+                    String::from_utf8_lossy(seq2),
+                    query,
+                    reference,
+                    score as f32,
+                )
+            }),
+            cigar: self.cigar_out.as_ref().map(|_| {
+                format!(
+                    "{locus}\t{crc1}\t{crc2}\t{}\t{snps}\t{indel_events}\t{indel_bases}\t{:.2}",
+                    cigar_from_aligned(query.as_bytes(), reference.as_bytes()),
+                    score as f32,
+                )
+            }),
         }
     }
 
-    /// Append one --save-alignments row (a write error is kept and reported
-    /// by `save_alignments`; later rows are then skipped).
-    fn write_alignment_row(&mut self, row: &str) {
-        use std::io::Write;
-        if self.alignment_error.is_some() {
-            return;
-        }
-        if self.alignment_writer.is_none() {
-            self.open_alignments();
-        }
-        if let Some(w) = self.alignment_writer.as_mut() {
-            match writeln!(w, "{row}") {
-                Ok(()) => self.alignment_rows += 1,
-                Err(e) => {
-                    self.alignment_error = Some(format!("Failed to write alignments file: {e}"))
-                }
-            }
-        }
-    }
-
-    /// Finish the alignment details file (--save-alignments). The file holds
-    /// the header and one row per pair aligned in this run; it is written
-    /// even when no pair was aligned.
+    /// Finish the per-pair output files (--save-alignments, --save-cigar).
+    /// Each holds its header and one row per pair aligned in this run, and is
+    /// written even when no pair was aligned.
     pub fn save_alignments(&mut self) -> Result<(), String> {
-        use std::io::Write;
-        let Some(path) = self.save_alignments_path.clone() else {
-            return Ok(());
-        };
-        if self.alignment_writer.is_none() && self.alignment_error.is_none() {
-            self.open_alignments();
-        }
-        if let Some(mut w) = self.alignment_writer.take() {
-            if let Err(e) = w.flush() {
-                self.alignment_error
-                    .get_or_insert(format!("Failed to write alignments file: {e}"));
+        let mut errors = Vec::new();
+        for (out, what) in [
+            (self.alignments_out.as_mut(), "alignment details"),
+            (self.cigar_out.as_mut(), "CIGAR rows"),
+        ] {
+            if let Some(w) = out {
+                match w.finish() {
+                    Ok(n) => println!("💾 Saved {n} {what} to: {}", w.path),
+                    Err(e) => errors.push(e),
+                }
             }
         }
-        if let Some(e) = self.alignment_error.take() {
-            return Err(e);
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
         }
-        println!(
-            "💾 Saved {} alignment details to: {}",
-            self.alignment_rows, path
-        );
-        Ok(())
     }
 }
+
+const ALIGNMENTS_HEADER: &str = "locus\thash1\thash2\tseq1\tseq2\taligned_seq1\taligned_seq2\tsnps\tindel_events\tindel_bases\talignment_score";
+const CIGAR_HEADER: &str =
+    "locus\thash1\thash2\tcigar\tsnps\tindel_events\tindel_bases\talignment_score";
 
 /// Calculate distance between two samples
 pub fn calculate_sample_distance(

@@ -11,13 +11,14 @@
 //   * align_certified (the production entry point) equals the reference;
 //   * parasail's scan 16-bit kernel (production fallback) equals the reference;
 //   * the gapped alignment strings from the band (used by --save-alignments)
-//     are byte-identical to parasail's get_traceback_strings;
+//     are byte-identical to parasail's get_traceback_strings, and the CIGAR
+//     derived from them (--save-cigar) equals parasail's get_cigar;
 //   * the lower bound never exceeds the optimal score.
 //
 //   cargo run --release --example banded_exhaustive -- <alphabet> <max_len>
 //   e.g. ACGTN 5    ACGT 6    ACGTa 4
 
-use cgdist::core::alignment::compute_alignment_stats;
+use cgdist::core::alignment::{cigar_from_aligned, compute_alignment_stats};
 use cgdist::core::banded::{
     align_certified, align_certified_with_strings, verify, BandedStats, Scoring,
 };
@@ -69,10 +70,11 @@ fn stats(a: &Aligner, q: &[u8], r: &[u8]) -> BandedStats {
     stats_and_strings(a, q, r).0
 }
 
-fn stats_and_strings(a: &Aligner, q: &[u8], r: &[u8]) -> (BandedStats, String, String) {
+fn stats_and_strings(a: &Aligner, q: &[u8], r: &[u8]) -> (BandedStats, String, String, String) {
     let res = a.align(Some(q), r).unwrap();
     assert!(!res.is_saturated());
     let tb = res.get_traceback_strings(q, r).unwrap();
+    let cigar = res.get_cigar(q, r).unwrap();
     let (snps, indel_events, indel_bases) = compute_alignment_stats(&tb.query, &tb.reference);
     let b = BandedStats {
         snps,
@@ -80,7 +82,7 @@ fn stats_and_strings(a: &Aligner, q: &[u8], r: &[u8]) -> (BandedStats, String, S
         indel_bases,
         score: res.get_score(),
     };
-    (b, tb.query, tb.reference)
+    (b, tb.query, tb.reference, cigar)
 }
 
 fn all_seqs(alpha: &[u8], max_len: usize) -> Vec<Vec<u8>> {
@@ -136,7 +138,7 @@ fn main() {
             let mut local_cert = 0u64;
             for r in &seqs {
                 for (pi, s) in PRESETS.iter().enumerate() {
-                    let (want, want_q, want_r) = stats_and_strings(&al[pi].0, q, r);
+                    let (want, want_q, want_r, want_cigar) = stats_and_strings(&al[pi].0, q, r);
                     let fail = |what: &str| {
                         failures.fetch_add(1, Ordering::Relaxed);
                         eprintln!(
@@ -162,6 +164,9 @@ fn main() {
                             || st.reference != want_r.as_bytes()
                         {
                             fail("aligned strings differ from parasail");
+                        }
+                        if cigar_from_aligned(&st.query, &st.reference) != want_cigar {
+                            fail("CIGAR differs from parasail get_cigar");
                         }
                     }
                     if verify::lower_bound(q, r, s) > want.score as i64 {

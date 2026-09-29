@@ -51,6 +51,12 @@ until the API stabilizes).
 
 ### Added
 
+- `--save-cigar <file>`: one compact row per aligned pair (locus, hash1,
+  hash2, CIGAR, snps, indel_events, indel_bases, alignment_score). The
+  extended CIGAR (`=`, `X`, `I`, `D`) gives the position of every SNP and
+  InDel, about 35x smaller than `--save-alignments`. It equals parasail's
+  `get_cigar` (verified exhaustively on short sequences and on 739,554 real
+  pairs).
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).

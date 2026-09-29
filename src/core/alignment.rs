@@ -171,3 +171,61 @@ pub fn compute_hamming_distance(seq1: &[u8], seq2: &[u8]) -> usize {
     // Add length difference as additional mismatches
     mismatches + (max_len - min_len)
 }
+
+/// CIGAR of a global alignment given as two gapped strings, in parasail's
+/// extended format (`parasail_result_get_cigar`): `=` match, `X` mismatch,
+/// `I` a query base against a reference gap, `D` a reference base against a
+/// query gap; runs are merged. As in parasail, bases are compared
+/// case-insensitively (so `a`/`A` is `=`), unlike the byte-wise SNP count of
+/// `compute_alignment_stats`.
+pub fn cigar_from_aligned(query: &[u8], reference: &[u8]) -> String {
+    let mut out = String::new();
+    let mut run_op = 0u8;
+    let mut run_len = 0usize;
+    for (&q, &r) in query.iter().zip(reference) {
+        let op = if q == b'-' {
+            b'D'
+        } else if r == b'-' {
+            b'I'
+        } else if q.eq_ignore_ascii_case(&r) {
+            b'='
+        } else {
+            b'X'
+        };
+        if op == run_op {
+            run_len += 1;
+        } else {
+            if run_len > 0 {
+                out.push_str(&run_len.to_string());
+                out.push(run_op as char);
+            }
+            run_op = op;
+            run_len = 1;
+        }
+    }
+    if run_len > 0 {
+        out.push_str(&run_len.to_string());
+        out.push(run_op as char);
+    }
+    out
+}
+
+#[cfg(test)]
+mod cigar_tests {
+    use super::cigar_from_aligned;
+
+    #[test]
+    fn cigar_runs_and_ops() {
+        // SNP at column 3, query-gap (D) at 6, reference-gap (I) at 8
+        assert_eq!(
+            cigar_from_aligned(b"ATGCA-TTG", b"ATCCATT-G"),
+            "2=1X2=1D1=1I1="
+        );
+        assert_eq!(cigar_from_aligned(b"ACGT", b"ACGT"), "4=");
+        assert_eq!(cigar_from_aligned(b"--AC", b"GGAC"), "2D2=");
+        assert_eq!(cigar_from_aligned(b"ACGG", b"AC--"), "2=2I");
+        // parasail compares case-insensitively; N matches N
+        assert_eq!(cigar_from_aligned(b"acNT", b"ACNA"), "3=1X");
+        assert_eq!(cigar_from_aligned(b"", b""), "");
+    }
+}

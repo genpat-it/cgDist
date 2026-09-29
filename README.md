@@ -304,6 +304,9 @@ ALIGNMENT OPTIONS:
     --gap-open <N>             Custom gap open penalty (enables custom mode)
     --gap-extend <N>           Custom gap extend penalty (enables custom mode)
     --save-alignments <FILE>   Save detailed alignments to TSV file
+    --save-cigar <FILE>        Save one compact CIGAR row per aligned pair (TSV)
+    --verify-alignments <F>    Re-check fraction F (0-1) of new alignments against
+                               parasail's original kernel; stop on any difference
 
 PERFORMANCE OPTIONS:
     --threads <N>              Number of threads [default: 1; pass 0 for auto-detect]
@@ -426,6 +429,35 @@ be e-mailed or archived with the analysis) with:
 > **Memory note:** both outputs hold one record per pair in memory
 > (n·(n−1)/2 pairs), so for very large datasets (tens of thousands of
 > samples) prefer the distance matrix alone or run them on a subset.
+
+## 📍 SNP and InDel Positions (`--save-cigar`)
+
+The cache stores only counts (SNPs, InDel events, InDel bases) per allele
+pair. To get **where** the differences are, `--save-cigar <file>` writes one
+row per pair aligned in the run:
+
+```
+locus  hash1  hash2  cigar  snps  indel_events  indel_bases  alignment_score
+wgMLST-00047350  250050033  2240303468  152=1X215=1X26=...  10  0  0  2742.00
+```
+
+The CIGAR uses parasail's extended alphabet. `hash1`'s allele is the query
+and `hash2`'s the reference:
+
+| op | meaning | advances |
+|----|---------|----------|
+| `=` | same base | query and reference |
+| `X` | SNP | query and reference |
+| `I` | base in the query, gap in the reference | query |
+| `D` | base in the reference, gap in the query | reference |
+
+To locate each difference, walk the CIGAR while counting query and
+reference positions. In the example above, the first SNP is at query and
+reference position 153 (1-based). As in parasail, bases are compared
+case-insensitively. The file is about 35x smaller than `--save-alignments`,
+which stores both gapped sequences. Both files contain only the pairs
+aligned in that run: pairs already in the cache are not re-aligned, so use
+`--force-recompute` (or no cache) to get every pair.
 
 ## 🧬 Recombination-Candidate Flagging
 

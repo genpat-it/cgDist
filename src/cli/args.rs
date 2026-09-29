@@ -141,6 +141,12 @@ pub struct Args {
     #[argh(option)]
     pub save_alignments: Option<String>,
 
+    /// save one compact CIGAR row per aligned pair (TSV: locus, hash1, hash2,
+    /// cigar, snps, indel_events, indel_bases, alignment_score); '=' match,
+    /// 'X' SNP, 'I' query base vs reference gap, 'D' reference base vs query gap
+    #[argh(option)]
+    pub save_cigar: Option<String>,
+
     /// re-check this fraction (0-1) of new alignments against parasail's
     /// original kernel and stop with an error on any difference; the pairs
     /// are chosen deterministically (default: 0 = off, 1 = all)

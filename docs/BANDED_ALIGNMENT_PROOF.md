@@ -218,7 +218,8 @@ The evidence:
 | Exhaustive: **every** pair over {A,C,G,T,N} up to length 5, all 3 presets, **every** band width; AVX2 i16, AVX2 i32, portable i32 and row-major implementations, parasail scan-16, all against parasail's original `nw_trace_striped_sat` | 15.2 M pairs, 272.6 M band checks | **0** |
 | Exhaustive: every pair over {A,C,G,T} up to length 6 | 29.8 M pairs, 620.1 M band checks | **0** |
 | Exhaustive: every pair over {A,C,G,T,a} up to length 4 (lower-case scoring vs byte-wise SNP counting) | 0.6 M pairs, 9.1 M band checks | **0** |
-| Gapped alignment strings (`--save-alignments`), exhaustive spaces above, vs parasail's `get_traceback_strings` | same pairs | **0** |
+| Gapped alignment strings (`--save-alignments`) and CIGAR (`--save-cigar`), exhaustive spaces above, vs parasail's `get_traceback_strings` / `get_cigar` | same pairs | **0** |
+| Gapped strings and CIGAR on real allele pairs vs parasail | 739,554 pairs | **0** |
 | Real allele pairs, L. monocytogenes and S. enterica | 739,554 pairs | **0** |
 | `--save-alignments` files vs cgdist 0.1.4, both datasets | 739,554 rows | byte-identical |
 | Adversarial fuzzing (tandem repeats, homopolymers, N, lower case, large length differences, unrelated sequences), 3 presets, two seeds | 400,000 cases, 218,237 certified | **0** |

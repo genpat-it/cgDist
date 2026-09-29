@@ -329,6 +329,11 @@ fn run_main() -> Result<(), String> {
         );
     }
 
+    if let Some(ref cigar_path) = args.save_cigar {
+        engine.set_save_cigar(cigar_path.clone());
+        println!("💾 CIGAR rows will be saved to: {cigar_path}");
+    }
+
     if let Some(ref save_path) = args.save_alignments {
         engine.set_save_alignments(save_path.clone());
         println!("💾 Alignment details will be saved to: {save_path}");
