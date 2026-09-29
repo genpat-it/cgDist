@@ -119,6 +119,11 @@ until the API stabilizes).
     all 234,439 overlapping pairs; 4.27 M all-lineage pairs re-checked
     against parasail's original kernel with no differences.
   - The Docker image also ships `cgdist-cache` and `cgdist-diff`.
+- All new options can also be set in the `--config` TOML file (save_cigar,
+  verify_alignments, cache_dir, cache_layer, weights, translation_table,
+  no_first_codon_as_met, coding_stats, aa_matrix, aa_gap_open,
+  aa_gap_extend, protein_cache_file). The command line takes precedence, and
+  `--generate-config` documents them.
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).

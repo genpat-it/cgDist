@@ -131,6 +131,52 @@ impl Args {
         if self.save_alignments.is_none() {
             self.save_alignments = config.save_alignments;
         }
+        if self.save_cigar.is_none() {
+            self.save_cigar = config.save_cigar;
+        }
+        if let Some(v) = config.verify_alignments {
+            if self.verify_alignments == 0.0 {
+                self.verify_alignments = v;
+            }
+        }
+        if self.cache_dir.is_none() {
+            self.cache_dir = config.cache_dir;
+        }
+        if self.cache_layer.is_empty() {
+            self.cache_layer = config.cache_layer.unwrap_or_default();
+        }
+        if self.weights.is_none() {
+            self.weights = config.weights;
+        }
+        if let Some(v) = config.translation_table {
+            if self.translation_table == 11 {
+                self.translation_table = v;
+            }
+        }
+        if !self.no_first_codon_as_met && config.no_first_codon_as_met.unwrap_or(false) {
+            self.no_first_codon_as_met = true;
+        }
+        if !self.coding_stats && config.coding_stats.unwrap_or(false) {
+            self.coding_stats = true;
+        }
+        if let Some(v) = config.aa_matrix {
+            if self.aa_matrix == "blosum62" {
+                self.aa_matrix = v;
+            }
+        }
+        if let Some(v) = config.aa_gap_open {
+            if self.aa_gap_open == 11 {
+                self.aa_gap_open = v;
+            }
+        }
+        if let Some(v) = config.aa_gap_extend {
+            if self.aa_gap_extend == 1 {
+                self.aa_gap_extend = v;
+            }
+        }
+        if self.protein_cache_file.is_none() {
+            self.protein_cache_file = config.protein_cache_file;
+        }
 
         self
     }

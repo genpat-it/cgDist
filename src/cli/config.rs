@@ -53,6 +53,19 @@ pub struct Config {
     pub force_recompute: Option<bool>,
     pub dry_run: Option<bool>,
     pub save_alignments: Option<String>,
+    // Per-pair outputs, cache stores, coding and protein-level options
+    pub save_cigar: Option<String>,
+    pub verify_alignments: Option<f64>,
+    pub cache_dir: Option<String>,
+    pub cache_layer: Option<Vec<String>>,
+    pub weights: Option<String>,
+    pub translation_table: Option<u32>,
+    pub no_first_codon_as_met: Option<bool>,
+    pub coding_stats: Option<bool>,
+    pub aa_matrix: Option<String>,
+    pub aa_gap_open: Option<i32>,
+    pub aa_gap_extend: Option<i32>,
+    pub protein_cache_file: Option<String>,
 }
 
 impl Config {
@@ -90,6 +103,18 @@ impl Config {
             force_recompute: None,
             dry_run: None,
             save_alignments: None,
+            save_cigar: None,
+            verify_alignments: None,
+            cache_dir: None,
+            cache_layer: None,
+            weights: None,
+            translation_table: None,
+            no_first_codon_as_met: None,
+            coding_stats: None,
+            aa_matrix: None,
+            aa_gap_open: None,
+            aa_gap_extend: None,
+            protein_cache_file: None,
         }
     }
 
@@ -245,6 +270,32 @@ dry_run = false
 
 # Save detailed alignments to file (TSV format)
 # save_alignments = "alignments.tsv"
+
+# Save one compact CIGAR row per aligned pair (TSV)
+# save_cigar = "cigar.tsv"
+
+# Re-check a fraction (0-1) of alignments against parasail's original kernel
+# verify_alignments = 0.0
+
+# Cache stores: local read/write store and read-only layers (dir, .cgpack or URL)
+# cache_dir = "my_store"
+# cache_layer = ["lm_dna.cgpack"]
+
+# Custom distance (mode = "custom"): per-locus weighted sum; keys: allele,
+# snps, indel_events, indel_bases, syn, nonsyn, frame_disrupted, aa_allele,
+# aa_subs, aa_indel_events, aa_indel_residues
+# weights = "nonsyn=1,frame_disrupted=1,indel_events=1"
+
+# Genetic code for synonymous/nonsynonymous and protein-level modes
+# translation_table = 11
+# no_first_codon_as_met = false
+# coding_stats = false
+
+# Protein-level modes (aa-hamming, aa-substitutions, ...)
+# aa_matrix = "blosum62"
+# aa_gap_open = 11
+# aa_gap_extend = 1
+# protein_cache_file = "prot.lz4"
 "#
         .to_string()
     }
