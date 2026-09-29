@@ -141,6 +141,17 @@ pub struct Args {
     #[argh(option)]
     pub save_alignments: Option<String>,
 
+    /// cache store directory (read and written): one compact file per
+    /// locus, created if missing; receives the pairs aligned in this run
+    #[argh(option)]
+    pub cache_dir: Option<String>,
+
+    /// read-only cache store to take alignments from: a store directory, a
+    /// .cgpack file or a URL of either (repeatable; only the needed loci are
+    /// read)
+    #[argh(option)]
+    pub cache_layer: Vec<String>,
+
     /// weights for --mode custom: per-locus contribution = sum of
     /// weight*count, e.g. "nonsyn=1,frame_disrupted=1,indel_events=1"; keys:
     /// allele (1 per differing locus), snps, indel_events, indel_bases, syn,

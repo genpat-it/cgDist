@@ -50,6 +50,7 @@ pub mod core;
 pub mod data;
 pub mod hashers;
 pub mod output;
+pub mod store;
 
 // Convenience prelude for common imports
 pub mod prelude {

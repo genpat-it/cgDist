@@ -115,6 +115,10 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
         return Err("synonymous/nonsynonymous counts need sequence alignments; they are not available with --hasher-type hamming".to_string());
     }
 
+    if args.cache_dir.is_some() && args.cache_file.is_some() {
+        return Err("use either --cache-file or --cache-dir, not both".to_string());
+    }
+
     if !(0.0..=1.0).contains(&args.verify_alignments) {
         return Err(format!(
             "--verify-alignments is a fraction between 0 and 1, got {}",

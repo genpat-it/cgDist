@@ -332,6 +332,8 @@ PERFORMANCE OPTIONS:
     --cache-file <FILE>        Cache file path (.lz4 extension)
     --cache-note <TEXT>        Note to save with cache
     --cache-only               Build cache only without computing distance matrix
+    --cache-dir <DIR>          Cache store (one compact file per locus; read + written)
+    --cache-layer <SRC>        Read-only cache store: directory, .cgpack or URL (repeatable)
     --force-recompute          Force recomputation ignoring cache
     --hasher-type <TYPE>       Allele hasher type [default: crc32]
                                Options: crc32, sha256, md5, sequence, hamming
@@ -595,6 +597,48 @@ cgdist refuses the cache if they differ from the run's. In `--mode custom`
 the keys `aa_allele`, `aa_subs`, `aa_indel_events` and `aa_indel_residues`
 can be combined with the DNA keys, e.g.
 `--weights "aa_subs=1,aa_indel_events=1,syn=0"`.
+
+## 📦 Cache Stores (`cgdist-cache`)
+
+A *cache store* is a directory with one compact binary file per locus plus
+a `manifest.json`. It holds alignment parameters, hasher, genetic code,
+checksums and counts, and can be precomputed, shared and updated
+incrementally. The per-locus format stores each allele hash once and
+encodes pair statistics column-wise before LZ4. It takes about 1-2 bytes
+per allele pair, against about 38 in a `.lz4` cache.
+
+```bash
+# precompute every allele pair of a schema (incremental and resumable)
+cgdist-cache build --schema schema_dir/ --out lm_store --threads 64
+
+# use it: pairs are read from the store, only missing ones are aligned
+cgdist ... --cache-layer lm_store            # read-only layer (dir, .cgpack or URL)
+cgdist ... --cache-dir my_store              # local store, receives new pairs
+
+# publish as a single file (e.g. Zenodo) and download only what is needed
+cgdist-cache pack --store lm_store --out lm_dna.cgpack
+cgdist-cache pull --from https://host/lm_dna.cgpack --out ~/.cache/cgdist/lm --profiles profiles.tsv
+
+cgdist-cache info   --store lm_dna.cgpack    # parameters, loci, pairs, size
+cgdist-cache verify --store lm_dna.cgpack    # checksums and decoding of every locus
+cgdist-cache import --cache cache.lz4 --out lm_store   # convert a cgdist cache
+```
+
+* **`build`** aligns with cgdist's own engine, so a store holds exactly what
+  cgdist would compute. It only aligns the pairs a locus is missing, which
+  makes an update after new alleles cheap, and saves the manifest after
+  every locus. `--verify-alignments` re-checks alignments against
+  parasail's original kernel, and `--coding-stats` also stores the
+  synonymous/nonsynonymous counts. On the L. monocytogenes schema (1,748
+  loci, 388,648 alleles), all 54,387,751 pairs took 169 s on 64 threads,
+  for a 56 MB store.
+* **`pull`** accepts a directory, a `.cgpack` file, or a URL of either.
+  For a `.cgpack` URL it downloads only the manifest and the needed loci
+  (HTTP Range); a server without Range support is read once in full. Every
+  locus is checked against its sha256, and loci already present are
+  skipped, so repeating a pull updates the store.
+* A store is used only if its hasher and alignment parameters match the
+  run; coding counts are used only if the genetic code matches.
 
 ## 🧬 Recombination-Candidate Flagging
 

@@ -31,11 +31,14 @@ RUN apt-get update && apt-get install -y \
 # Create non-root user for security
 RUN useradd -r -s /bin/false cgdist
 
-# Copy compiled binary
+# Copy compiled binaries (cgdist; cgdist-cache for cache stores; cgdist-diff
+# to inspect one allele pair: use --entrypoint to run the helpers)
 COPY --from=builder /app/target/release/cgdist /usr/local/bin/cgdist
+COPY --from=builder /app/target/release/cgdist-cache /usr/local/bin/cgdist-cache
+COPY --from=builder /app/target/release/cgdist-diff /usr/local/bin/cgdist-diff
 
-# Ensure binary is executable
-RUN chmod +x /usr/local/bin/cgdist
+# Ensure binaries are executable
+RUN chmod +x /usr/local/bin/cgdist /usr/local/bin/cgdist-cache /usr/local/bin/cgdist-diff
 
 # Create directory for data
 RUN mkdir -p /data && chown cgdist:cgdist /data

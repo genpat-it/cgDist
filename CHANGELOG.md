@@ -102,6 +102,23 @@ until the API stabilizes).
   - the scan kernel equals parasail's striped kernel on 229,422 real
     protein pairs (BLOSUM62, PAM250);
   - custom weightings equal the built-in protein modes.
+- Cache stores (new module `store`, new binary `cgdist-cache`): a
+  distributable per-locus cache format (about 1-2 bytes per pair, with
+  per-allele lengths and optional coding counts), and single-file `.cgpack`
+  publication.
+  - `cgdist-cache build` precomputes all pairs of a schema with cgdist's
+    engine; it is incremental and resumable. On the L. monocytogenes
+    schema, 54.4 M pairs took 169 s on 64 threads, for a 56 MB store.
+  - Other commands: `import` (from a .lz4 cache), `pack`, `pull` (dir,
+    pack or URL, HTTP Range, sha256-verified, incremental), `info`,
+    `verify`.
+  - `cgdist --cache-dir` (read/write store) and `--cache-layer`
+    (read-only, repeatable). Only the loci and alleles of the run are read.
+  - Checked: runs from a full store realign nothing and give matrices
+    identical to 0.1.4; store entries are identical to 0.1.4 results for
+    all 234,439 overlapping pairs; 4.27 M all-lineage pairs re-checked
+    against parasail's original kernel with no differences.
+  - The Docker image also ships `cgdist-cache` and `cgdist-diff`.
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).

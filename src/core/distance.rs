@@ -149,6 +149,10 @@ pub struct DistanceEngine {
     weights: DistanceWeights,
     // Protein-level results (protein modes and aa_* weights)
     protein: Option<ProteinStore>,
+    // Pairs aligned in this run (written to a cache store by save_to_store)
+    new_keys: HashSet<DistanceCacheKey>,
+    // Suppress progress output of precompute_alignments (batch builders)
+    quiet: bool,
     // --save-alignments / --save-cigar outputs, written as rows are produced
     alignments_out: Option<RowWriter>,
     cigar_out: Option<RowWriter>,
@@ -480,6 +484,8 @@ impl DistanceEngine {
             loaded_code: None,
             weights: DistanceWeights::default(),
             protein: None,
+            new_keys: HashSet::new(),
+            quiet: false,
             alignments_out: None,
             cigar_out: None,
         }
@@ -503,6 +509,8 @@ impl DistanceEngine {
             loaded_code: None,
             weights: DistanceWeights::default(),
             protein: None,
+            new_keys: HashSet::new(),
+            quiet: false,
             alignments_out: None,
             cigar_out: None,
         }
@@ -1102,7 +1110,9 @@ impl DistanceEngine {
             || mode.is_protein()
             || (mode == DistanceMode::Weighted && !self.weights.needs_alignment())
         {
-            println!("🎯 Hamming mode: no alignments needed ({total_pairs} allele pairs)");
+            if !self.quiet {
+                println!("🎯 Hamming mode: no alignments needed ({total_pairs} allele pairs)");
+            }
             return;
         }
 
@@ -1132,29 +1142,43 @@ impl DistanceEngine {
         let cached_pairs = total_pairs - missing_pairs.len();
         let missing_count = missing_pairs.len();
 
-        println!(
-            "🔍 Filtered unique pairs in {:.3}s:",
-            filter_elapsed.as_secs_f64()
-        );
-        println!("   📊 Total pairs needed: {total_pairs}");
-        println!(
-            "   ✅ Already in cache: {} ({:.1}%)",
-            cached_pairs,
-            (cached_pairs as f64 / total_pairs as f64) * 100.0
-        );
-        println!(
-            "   🔥 Missing pairs to compute: {} ({:.1}%)",
-            missing_count,
-            (missing_count as f64 / total_pairs as f64) * 100.0
-        );
+        if !self.quiet {
+            println!(
+                "🔍 Filtered unique pairs in {:.3}s:",
+                filter_elapsed.as_secs_f64()
+            );
+        }
+        if !self.quiet {
+            println!("   📊 Total pairs needed: {total_pairs}");
+        }
+        if !self.quiet {
+            println!(
+                "   ✅ Already in cache: {} ({:.1}%)",
+                cached_pairs,
+                (cached_pairs as f64 / total_pairs as f64) * 100.0
+            );
+        }
+        if !self.quiet {
+            println!(
+                "   🔥 Missing pairs to compute: {} ({:.1}%)",
+                missing_count,
+                (missing_count as f64 / total_pairs as f64) * 100.0
+            );
+        }
 
         if missing_pairs.is_empty() {
-            println!("🎯 All pairs already cached - no computation needed!");
+            if !self.quiet {
+                println!("🎯 All pairs already cached - no computation needed!");
+            }
             return;
         }
 
         // Setup progress bar for missing pairs only (update every 1% to reduce overhead)
-        let pb = ProgressBar::new(missing_count as u64);
+        let pb = if self.quiet {
+            ProgressBar::hidden()
+        } else {
+            ProgressBar::new(missing_count as u64)
+        };
         pb.set_style(
             ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {per_sec} ETA: {eta}")
@@ -1261,6 +1285,11 @@ impl DistanceEngine {
                             },
                         );
                         self.has_new_entries = true;
+                        self.new_keys.insert(DistanceCacheKey {
+                            locus: locus.clone(),
+                            crc1: (*crc1).min(*crc2),
+                            crc2: (*crc1).max(*crc2),
+                        });
                         if let Some(d) = detail {
                             if let (Some(row), Some(w)) = (d.full, self.alignments_out.as_mut()) {
                                 w.write(&row);
@@ -1280,21 +1309,29 @@ impl DistanceEngine {
         let compute_elapsed = start_compute.elapsed();
         let aligned_count = missing_count - unaligned.len();
 
-        println!("🚀 Cache-aware precompute completed:");
-        println!(
-            "   ⚡ Computed {} new alignments in {:.2}s ({:.0} alignments/sec)",
-            aligned_count,
-            compute_elapsed.as_secs_f64(),
-            aligned_count as f64 / compute_elapsed.as_secs_f64()
-        );
+        if !self.quiet {
+            println!("🚀 Cache-aware precompute completed:");
+        }
+        if !self.quiet {
+            println!(
+                "   ⚡ Computed {} new alignments in {:.2}s ({:.0} alignments/sec)",
+                aligned_count,
+                compute_elapsed.as_secs_f64(),
+                aligned_count as f64 / compute_elapsed.as_secs_f64()
+            );
+        }
         if !unaligned.is_empty() {
             self.report_unaligned(&unaligned, total_pairs);
         }
-        println!(
-            "   📈 Total efficiency: {:.1}% time saved vs full recompute",
-            (cached_pairs as f64 / total_pairs as f64) * 100.0
-        );
-        println!("   💾 Cache now contains {} entries", self.cache.len());
+        if !self.quiet {
+            println!(
+                "   📈 Total efficiency: {:.1}% time saved vs full recompute",
+                (cached_pairs as f64 / total_pairs as f64) * 100.0
+            );
+        }
+        if !self.quiet {
+            println!("   💾 Cache now contains {} entries", self.cache.len());
+        }
     }
 
     /// Warn about allele pairs that could not be aligned. They fall back to
@@ -1822,6 +1859,196 @@ impl DistanceEngine {
     /// Weights used by DistanceMode::Weighted.
     pub fn set_weights(&mut self, weights: DistanceWeights) {
         self.weights = weights;
+    }
+
+    /// Load, from a cache store (directory, pack file or URL), the entries of
+    /// the allele pairs of this run. `needed` maps each locus to the alleles
+    /// present in the run. Entries already loaded are kept. Returns the
+    /// number of entries added.
+    pub fn load_from_source(
+        &mut self,
+        source: &crate::store::remote::Source,
+        needed: &HashMap<String, HashSet<u32>>,
+    ) -> Result<usize, String> {
+        let manifest = source.manifest()?;
+        manifest.check_compatible(
+            &self.hasher_type,
+            &crate::store::AlignmentParams::from(&self.config),
+        )?;
+        // coding counts only if computed with the run's genetic code (or when
+        // the run does not ask for a specific one)
+        let keep_coding = match (&self.coding, manifest.genetic_code) {
+            (Some(code), Some(meta)) => GeneticCodeMeta::from(code) == meta,
+            (_, None) => false,
+            (None, Some(_)) => true,
+        };
+        if self.coding.is_none() && keep_coding {
+            self.loaded_code = manifest.genetic_code;
+        }
+        let loci: Vec<(&String, &crate::store::LocusEntry)> = needed
+            .keys()
+            .filter_map(|l| manifest.loci.get_key_value(l))
+            .collect();
+        let blobs: Vec<(String, Vec<u8>)> = loci
+            .par_iter()
+            .map(|(l, e)| source.locus_bytes(e).map(|b| ((*l).clone(), b)))
+            .collect::<Result<_, _>>()?;
+        let mut added = 0usize;
+        for (locus, bytes) in blobs {
+            let want = &needed[&locus];
+            let mut lens: HashMap<u32, u32> = HashMap::new();
+            let mut rows: Vec<(u32, u32, crate::store::PairStats)> = Vec::new();
+            crate::store::decode_with(
+                &bytes,
+                |alleles| {
+                    for &(c, l) in alleles {
+                        if want.contains(&c) && l > 0 {
+                            lens.insert(c, l);
+                        }
+                    }
+                },
+                |a, b, st| {
+                    if want.contains(&a) && want.contains(&b) {
+                        rows.push((a, b, st));
+                    }
+                },
+            )
+            .map_err(|e| format!("locus {locus}: {e}"))?;
+            for (a, b, st) in rows {
+                let key = DistanceCacheKey {
+                    locus: locus.clone(),
+                    crc1: a,
+                    crc2: b,
+                };
+                if self.cache.contains_key(&key) {
+                    continue;
+                }
+                self.cache.insert(
+                    key,
+                    CacheEntry {
+                        snps: st.snps as usize,
+                        indel_events: st.indel_events as usize,
+                        indel_bases: st.indel_bases as usize,
+                        lens: (lens.get(&a).copied(), lens.get(&b).copied()),
+                        coding: if keep_coding {
+                            st.coding
+                                .map(|(syn, nonsyn, frame_disrupted)| CodingCounts {
+                                    syn,
+                                    nonsyn,
+                                    frame_disrupted,
+                                })
+                        } else {
+                            None
+                        },
+                    },
+                );
+                added += 1;
+            }
+        }
+        Ok(added)
+    }
+
+    /// Write the pairs aligned in this run to a (writable, locked) cache
+    /// store, merged with what the store holds for those loci. Returns
+    /// (loci written, pairs added).
+    pub fn save_to_store(
+        &mut self,
+        store: &mut crate::store::Store,
+    ) -> Result<(usize, usize), String> {
+        if self.new_keys.is_empty() {
+            return Ok((0, 0));
+        }
+        let run_code = self.coding.as_ref().map(GeneticCodeMeta::from);
+        let write_coding = match (store.manifest.genetic_code, run_code) {
+            (_, None) => false,
+            (None, Some(c)) => {
+                store.manifest.genetic_code = Some(c);
+                true
+            }
+            (Some(a), Some(b)) => {
+                if a != b {
+                    eprintln!(
+                        "⚠️  cache store holds coding counts for another genetic code; new coding counts are not stored"
+                    );
+                }
+                a == b
+            }
+        };
+        let mut by_locus: HashMap<&str, Vec<&DistanceCacheKey>> = HashMap::new();
+        for k in &self.new_keys {
+            by_locus.entry(k.locus.as_str()).or_default().push(k);
+        }
+        let mut pairs = 0usize;
+        let n_loci = by_locus.len();
+        for (locus, keys) in by_locus {
+            let mut data = store.read_locus(locus)?.unwrap_or_default();
+            for k in keys {
+                let Some(e) = self.cache.get(k) else { continue };
+                data.insert_pair(
+                    k.crc1,
+                    k.crc2,
+                    crate::store::PairStats {
+                        snps: e.snps as u32,
+                        indel_events: e.indel_events as u32,
+                        indel_bases: e.indel_bases as u32,
+                        coding: if write_coding {
+                            e.coding.map(|c| (c.syn, c.nonsyn, c.frame_disrupted))
+                        } else {
+                            None
+                        },
+                    },
+                );
+                if let Some(l) = e.lens.0 {
+                    data.set_allele_len(k.crc1, l);
+                }
+                if let Some(l) = e.lens.1 {
+                    data.set_allele_len(k.crc2, l);
+                }
+                pairs += 1;
+            }
+            store.write_locus(locus, &data)?;
+        }
+        store.save_manifest()?;
+        self.new_keys.clear();
+        Ok((n_loci, pairs))
+    }
+
+    /// Move every cache entry out, grouped by locus in the cache-store
+    /// representation (allele lengths and coding counts included).
+    pub fn drain_to_locus_data(&mut self) -> HashMap<String, crate::store::LocusData> {
+        let mut out: HashMap<String, crate::store::LocusData> = HashMap::new();
+        for (k, e) in self.cache.drain() {
+            let d = out.entry(k.locus).or_default();
+            d.insert_pair(
+                k.crc1,
+                k.crc2,
+                crate::store::PairStats {
+                    snps: e.snps as u32,
+                    indel_events: e.indel_events as u32,
+                    indel_bases: e.indel_bases as u32,
+                    coding: e.coding.map(|c| (c.syn, c.nonsyn, c.frame_disrupted)),
+                },
+            );
+            if let Some(l) = e.lens.0 {
+                d.set_allele_len(k.crc1, l);
+            }
+            if let Some(l) = e.lens.1 {
+                d.set_allele_len(k.crc2, l);
+            }
+        }
+        self.new_keys.clear();
+        out
+    }
+
+    /// Suppress the progress output of precompute_alignments (warnings about
+    /// unalignable pairs are still printed).
+    pub fn set_quiet(&mut self, quiet: bool) {
+        self.quiet = quiet;
+    }
+
+    /// Alignment parameters of this engine.
+    pub fn alignment_config(&self) -> &AlignmentConfig {
+        &self.config
     }
 
     /// Enable protein-level results (protein modes, aa_* weights).

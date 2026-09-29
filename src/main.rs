@@ -356,6 +356,42 @@ fn run_main() -> Result<(), String> {
         println!("💾 Alignment details will be saved to: {save_path}");
     }
 
+    // Cache stores: read-only layers, then the writable --cache-dir
+    if args.hasher_type != "hamming" && (!args.cache_layer.is_empty() || args.cache_dir.is_some()) {
+        let mut needed: std::collections::HashMap<String, HashSet<u32>> =
+            std::collections::HashMap::new();
+        for (l, a, b) in &unique_pairs {
+            let e = needed.entry(l.clone()).or_default();
+            e.insert(*a);
+            e.insert(*b);
+        }
+        let mut sources: Vec<String> = Vec::new();
+        if let Some(dir) = &args.cache_dir {
+            if std::path::Path::new(dir)
+                .join(cgdist::store::MANIFEST_FILE)
+                .exists()
+            {
+                sources.push(dir.clone());
+            }
+        }
+        sources.extend(args.cache_layer.iter().cloned());
+        if !args.force_recompute {
+            for src in &sources {
+                let source = cgdist::store::remote::Source::parse(src);
+                match engine.load_from_source(&source, &needed) {
+                    Ok(n) => println!(
+                        "📂 Cache store {}: {n} entries for this run",
+                        source.describe()
+                    ),
+                    Err(e) => {
+                        eprintln!("❌ FATAL ERROR reading cache store {src}: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+
     // Try to load existing cache first (skip for hamming hasher)
     if args.hasher_type != "hamming" {
         if let Some(ref cache_path) = args.cache_file {
@@ -431,6 +467,28 @@ fn run_main() -> Result<(), String> {
         }
     } else {
         println!("🔨 Using Hamming hasher - no alignment precomputation needed");
+    }
+
+    // Write the pairs aligned in this run to the cache store
+    if let (Some(dir), true) = (&args.cache_dir, args.hasher_type != "hamming") {
+        let params = cgdist::store::AlignmentParams::from(engine.alignment_config());
+        let saved = cgdist::store::Store::open_or_create(
+            std::path::Path::new(dir),
+            &args.hasher_type,
+            params,
+        )
+        .and_then(|mut store| {
+            let _lock = store.lock()?;
+            engine.save_to_store(&mut store)
+        });
+        match saved {
+            Ok((0, _)) => println!("📌 Cache store unchanged"),
+            Ok((loci, pairs)) => println!("💾 Cache store {dir}: {pairs} new pairs in {loci} loci"),
+            Err(e) => {
+                eprintln!("❌ ERROR writing cache store {dir}: {e}");
+                std::process::exit(1);
+            }
+        }
     }
 
     // Protein level: translate alleles, align distinct protein pairs
