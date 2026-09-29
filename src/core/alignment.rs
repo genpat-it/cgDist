@@ -95,6 +95,27 @@ pub enum DistanceMode {
     NonsynSnps,
     /// user-defined weighted sum of per-pair counts (see DistanceWeights)
     Weighted,
+    /// 1 per locus whose alleles encode different proteins
+    AaHamming,
+    /// amino-acid substitutions
+    AaSubs,
+    /// amino-acid substitutions + InDel events of the protein alignment
+    AaSubsIndelEvents,
+    /// amino-acid substitutions + inserted/deleted residues
+    AaSubsIndelResidues,
+}
+
+impl DistanceMode {
+    /// Needs protein-level results (core::protein_distance).
+    pub fn is_protein(self) -> bool {
+        matches!(
+            self,
+            DistanceMode::AaHamming
+                | DistanceMode::AaSubs
+                | DistanceMode::AaSubsIndelEvents
+                | DistanceMode::AaSubsIndelResidues
+        )
+    }
 }
 
 /// Per-locus contribution of a pair of different alleles in `--mode custom`:
@@ -113,10 +134,18 @@ pub struct DistanceWeights {
     pub nonsyn: u32,
     /// SNPs in codons shifted or split by an InDel
     pub frame_disrupted: u32,
+    /// 1 per locus whose alleles encode different proteins
+    pub aa_allele: u32,
+    /// amino-acid substitutions (protein alignment)
+    pub aa_subs: u32,
+    /// InDel events of the protein alignment
+    pub aa_indel_events: u32,
+    /// inserted/deleted residues of the protein alignment
+    pub aa_indel_residues: u32,
 }
 
 impl DistanceWeights {
-    pub const KEYS: [&'static str; 7] = [
+    pub const KEYS: [&'static str; 11] = [
         "allele",
         "snps",
         "indel_events",
@@ -124,6 +153,10 @@ impl DistanceWeights {
         "syn",
         "nonsyn",
         "frame_disrupted",
+        "aa_allele",
+        "aa_subs",
+        "aa_indel_events",
+        "aa_indel_residues",
     ];
 
     /// Parse "key=weight,key=weight" (keys in `KEYS`, non-negative integers).
@@ -149,6 +182,10 @@ impl DistanceWeights {
                 "syn" => &mut w.syn,
                 "nonsyn" => &mut w.nonsyn,
                 "frame_disrupted" => &mut w.frame_disrupted,
+                "aa_allele" => &mut w.aa_allele,
+                "aa_subs" => &mut w.aa_subs,
+                "aa_indel_events" => &mut w.aa_indel_events,
+                "aa_indel_residues" => &mut w.aa_indel_residues,
                 other => {
                     return Err(format!(
                         "--weights: unknown key '{other}' (use: {})",
@@ -170,9 +207,17 @@ impl DistanceWeights {
         self.syn > 0 || self.nonsyn > 0 || self.frame_disrupted > 0
     }
 
-    /// Whether any weight needs an alignment (everything but `allele`).
+    /// Whether any weight needs a DNA alignment.
     pub fn needs_alignment(&self) -> bool {
         self.snps > 0 || self.indel_events > 0 || self.indel_bases > 0 || self.needs_coding()
+    }
+
+    /// Whether any weight needs protein-level results.
+    pub fn needs_protein(&self) -> bool {
+        self.aa_allele > 0
+            || self.aa_subs > 0
+            || self.aa_indel_events > 0
+            || self.aa_indel_residues > 0
     }
 
     pub fn describe(&self) -> String {
@@ -184,6 +229,10 @@ impl DistanceWeights {
             self.syn,
             self.nonsyn,
             self.frame_disrupted,
+            self.aa_allele,
+            self.aa_subs,
+            self.aa_indel_events,
+            self.aa_indel_residues,
         ];
         Self::KEYS
             .iter()
@@ -210,7 +259,11 @@ impl FromStr for DistanceMode {
             "hamming" => Ok(DistanceMode::Hamming),
             "nonsyn-snps" | "nonsynonymous-snps" => Ok(DistanceMode::NonsynSnps),
             "custom" => Ok(DistanceMode::Weighted),
-            _ => Err(format!("Invalid distance mode: {s}. Use: snps, snps-indel-contiguous, snps-indel-bases, hamming, nonsyn-snps, custom"))
+            "aa-hamming" => Ok(DistanceMode::AaHamming),
+            "aa-substitutions" => Ok(DistanceMode::AaSubs),
+            "aa-substitutions-indel-events" => Ok(DistanceMode::AaSubsIndelEvents),
+            "aa-substitutions-indel-residues" => Ok(DistanceMode::AaSubsIndelResidues),
+            _ => Err(format!("Invalid distance mode: {s}. Use: snps, snps-indel-contiguous, snps-indel-bases, hamming, nonsyn-snps, aa-hamming, aa-substitutions, aa-substitutions-indel-events, aa-substitutions-indel-residues, custom"))
         }
     }
 }
@@ -224,6 +277,10 @@ impl DistanceMode {
             DistanceMode::Hamming => "Hamming distance (all mismatches)",
             DistanceMode::NonsynSnps => "nonsynonymous SNPs",
             DistanceMode::Weighted => "custom weighted counts",
+            DistanceMode::AaHamming => "loci with different proteins",
+            DistanceMode::AaSubs => "amino-acid substitutions",
+            DistanceMode::AaSubsIndelEvents => "amino-acid substitutions + InDel events",
+            DistanceMode::AaSubsIndelResidues => "amino-acid substitutions + InDel residues",
         }
     }
 }

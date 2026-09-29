@@ -83,6 +83,21 @@ until the API stabilizes).
   - syn + nonsyn + frame_disrupted = snps on all 739,554 cache entries;
   - counts equal to cgdist-diff (Biopython-validated) on 600 pairs;
   - completing a 0.1.4 cache reproduces every cached SNP/InDel count.
+- Protein-level distances (new module `core::protein_distance`):
+  - modes `aa-hamming`, `aa-substitutions`, `aa-substitutions-indel-events`
+    and `aa-substitutions-indel-residues`, plus the `aa_*` keys for
+    `--weights`;
+  - alleles translated on the fly; proteins deduplicated by hash (a CRC32
+    collision between distinct proteins of a locus stops the run);
+  - distinct proteins aligned with parasail, with `--aa-matrix` (any
+    BLOSUM/PAM or a file), `--aa-gap-open` and `--aa-gap-extend`;
+  - a separate `--protein-cache-file` whose settings must match the run.
+
+  Checked:
+  - aa-hamming equals Biopython-translated proteins on 990 sample pairs;
+  - the scan kernel equals parasail's striped kernel on 229,422 real
+    protein pairs (BLOSUM62, PAM250);
+  - custom weightings equal the built-in protein modes.
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).

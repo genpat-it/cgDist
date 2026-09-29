@@ -433,6 +433,41 @@ fn run_main() -> Result<(), String> {
         println!("🔨 Using Hamming hasher - no alignment precomputation needed");
     }
 
+    // Protein level: translate alleles, align distinct protein pairs
+    if let Some(settings) = validation_result.protein.clone() {
+        let mut store = match cgdist::core::protein_distance::ProteinStore::new(settings) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("❌ ERROR: {e}");
+                std::process::exit(1);
+            }
+        };
+        if let Some(pc) = &args.protein_cache_file {
+            if std::path::Path::new(pc).exists() && !args.force_recompute {
+                match store.load(pc) {
+                    Ok(n) => println!("📂 Protein cache loaded: {n} protein pairs from {pc}"),
+                    Err(e) => {
+                        eprintln!("❌ FATAL ERROR loading protein cache: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        engine.set_protein_store(store);
+        if let Err(e) = engine.precompute_proteins(&unique_pairs) {
+            eprintln!("❌ ERROR: {e}");
+            std::process::exit(1);
+        }
+        if let (Some(pc), Some(store)) = (&args.protein_cache_file, engine.protein_store()) {
+            if store.has_new_entries() {
+                match store.save(pc) {
+                    Ok(()) => println!("💾 Protein cache saved to {pc}"),
+                    Err(e) => eprintln!("⚠️  Warning: {e}"),
+                }
+            }
+        }
+    }
+
     // Check if cache-only mode
     if args.cache_only {
         println!("\n✅ Cache-only mode: Alignments computed and cached successfully");

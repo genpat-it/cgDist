@@ -5,6 +5,7 @@ pub mod banded;
 pub mod codon_tables;
 pub mod distance;
 pub mod protein;
+pub mod protein_distance;
 // pub mod recombination; // Disabled - pluggable system not needed for now
 
 // Re-export main types for convenience

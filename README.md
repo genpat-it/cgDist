@@ -314,6 +314,16 @@ CODING / CUSTOM DISTANCE OPTIONS:
     --translation-table <N>    NCBI genetic code for syn/nonsyn [default: 11]
     --no-first-codon-as-met    Do not read GTG/TTG/... at codon 1 as Met
     --coding-stats             Store syn/nonsyn counts in the cache for later use
+
+PROTEIN-LEVEL OPTIONS:
+    --mode aa-hamming          Loci whose alleles encode different proteins
+    --mode aa-substitutions    Amino-acid substitutions
+    --mode aa-substitutions-indel-events    ... + InDel events
+    --mode aa-substitutions-indel-residues  ... + inserted/deleted residues
+    --aa-matrix <NAME|FILE>    blosum30..blosum100, pam10..pam500, or a file [default: blosum62]
+    --aa-gap-open <N>          Gap of L residues costs open+(L-1)*extend [default: 11]
+    --aa-gap-extend <N>        [default: 1]
+    --protein-cache-file <F>   Cache of protein-pair results (.lz4)
     --verify-alignments <F>    Re-check fraction F (0-1) of new alignments against
                                parasail's original kernel; stop on any difference
 
@@ -554,6 +564,31 @@ them, or with another genetic code, are realigned when needed. The
 realignment must reproduce the cached SNP/InDel counts, otherwise cgdist
 stops with an error. Older cgdist versions read such caches unchanged.
 `--coding-stats` stores the counts even when the mode does not use them.
+
+## 🧫 Protein-Level Distances
+
+Alleles are translated on the fly from the DNA schema: the genetic code is
+set with `--translation-table`, and the terminal stop is removed. Each
+allele gets a protein hash, so alleles that differ only by synonymous
+mutations share a protein and need no alignment. Distinct proteins are
+aligned globally with parasail (`--aa-matrix`, `--aa-gap-open`,
+`--aa-gap-extend`). Amino-acid substitutions and InDels are counted as for
+DNA:
+
+```bash
+cgdist ... --mode aa-substitutions-indel-events --protein-cache-file prot.lz4
+```
+
+On the L. monocytogenes test set (300 samples), 26,926 DNA alleles encode
+13,453 distinct proteins, and 234,439 DNA allele pairs reduce to 67,763
+protein pairs.
+
+Protein results are kept in a separate cache (`--protein-cache-file`). Its
+metadata records the genetic code, the matrix and the gap penalties, and
+cgdist refuses the cache if they differ from the run's. In `--mode custom`
+the keys `aa_allele`, `aa_subs`, `aa_indel_events` and `aa_indel_residues`
+can be combined with the DNA keys, e.g.
+`--weights "aa_subs=1,aa_indel_events=1,syn=0"`.
 
 ## 🧬 Recombination-Candidate Flagging
 

@@ -158,6 +158,24 @@ pub struct Args {
     #[argh(switch)]
     pub no_first_codon_as_met: bool,
 
+    /// substitution matrix for protein-level modes: blosum30..blosum100,
+    /// pam10..pam500, or a matrix file (default: blosum62)
+    #[argh(option, default = "String::from(\"blosum62\")")]
+    pub aa_matrix: String,
+
+    /// protein gap open penalty; a gap of L residues costs open + (L-1)*extend
+    /// (default: 11)
+    #[argh(option, default = "11")]
+    pub aa_gap_open: i32,
+
+    /// protein gap extend penalty (default: 1)
+    #[argh(option, default = "1")]
+    pub aa_gap_extend: i32,
+
+    /// protein-level cache file (.lz4) for aa-* modes and aa_* weights
+    #[argh(option)]
+    pub protein_cache_file: Option<String>,
+
     /// compute and store synonymous/nonsynonymous SNP counts in the cache
     /// even when the distance mode does not use them
     #[argh(switch)]

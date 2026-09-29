@@ -5,6 +5,7 @@ use crate::core::alignment::{
 };
 use crate::core::banded::{align_certified, align_certified_with_strings, Scoring};
 use crate::core::protein::{coding_counts, CodingCounts, GeneticCode};
+use crate::core::protein_distance::ProteinStore;
 use crate::data::{AllelicProfile, SequenceDatabase};
 use crate::hashers::{AlleleHasher, HasherRegistry};
 use chrono;
@@ -146,6 +147,8 @@ pub struct DistanceEngine {
     loaded_code: Option<GeneticCodeMeta>,
     // Weights for DistanceMode::Weighted
     weights: DistanceWeights,
+    // Protein-level results (protein modes and aa_* weights)
+    protein: Option<ProteinStore>,
     // --save-alignments / --save-cigar outputs, written as rows are produced
     alignments_out: Option<RowWriter>,
     cigar_out: Option<RowWriter>,
@@ -476,6 +479,7 @@ impl DistanceEngine {
             coding: None,
             loaded_code: None,
             weights: DistanceWeights::default(),
+            protein: None,
             alignments_out: None,
             cigar_out: None,
         }
@@ -498,6 +502,7 @@ impl DistanceEngine {
             coding: None,
             loaded_code: None,
             weights: DistanceWeights::default(),
+            protein: None,
             alignments_out: None,
             cigar_out: None,
         }
@@ -533,8 +538,38 @@ impl DistanceEngine {
         if self.hasher_type == "hamming" || mode == DistanceMode::Hamming {
             return 1;
         }
-        if mode == DistanceMode::Weighted && !self.weights.needs_alignment() {
-            return self.weights.allele as usize;
+        if mode.is_protein() {
+            let (differ, subs, ev, res) = self.protein_terms(locus, crc1, crc2);
+            return match mode {
+                DistanceMode::AaHamming => differ,
+                DistanceMode::AaSubs => subs,
+                DistanceMode::AaSubsIndelEvents => subs + ev,
+                _ => subs + res,
+            };
+        }
+        if mode == DistanceMode::Weighted {
+            let w = self.weights;
+            let mut d = w.allele as usize;
+            if w.needs_protein() {
+                let (differ, subs, ev, res) = self.protein_terms(locus, crc1, crc2);
+                d += (w.aa_allele as usize) * differ
+                    + (w.aa_subs as usize) * subs
+                    + (w.aa_indel_events as usize) * ev
+                    + (w.aa_indel_residues as usize) * res;
+            }
+            if w.needs_alignment() {
+                let (lo, hi) = (crc1.min(crc2), crc1.max(crc2));
+                if let Some(entry) = self.cache.get(&(locus, lo, hi) as &dyn KeyView) {
+                    let coding = entry.coding.unwrap_or_default();
+                    d += (w.snps as usize) * entry.snps
+                        + (w.indel_events as usize) * entry.indel_events
+                        + (w.indel_bases as usize) * entry.indel_bases
+                        + (w.syn as usize) * coding.syn as usize
+                        + (w.nonsyn as usize) * coding.nonsyn as usize
+                        + (w.frame_disrupted as usize) * coding.frame_disrupted as usize;
+                }
+            }
+            return d;
         }
 
         // Optimized key lookup - temporarily create key for lookup only
@@ -552,16 +587,12 @@ impl DistanceEngine {
                 DistanceMode::SnpsAndIndelBases => entry.snps + entry.indel_bases,
                 DistanceMode::Hamming => 1, // For hamming mode, different CRCs = 1
                 DistanceMode::NonsynSnps => coding.nonsyn as usize,
-                DistanceMode::Weighted => {
-                    let w = &self.weights;
-                    (w.allele as usize)
-                        + (w.snps as usize) * entry.snps
-                        + (w.indel_events as usize) * entry.indel_events
-                        + (w.indel_bases as usize) * entry.indel_bases
-                        + (w.syn as usize) * coding.syn as usize
-                        + (w.nonsyn as usize) * coding.nonsyn as usize
-                        + (w.frame_disrupted as usize) * coding.frame_disrupted as usize
-                }
+                // handled above
+                DistanceMode::Weighted
+                | DistanceMode::AaHamming
+                | DistanceMode::AaSubs
+                | DistanceMode::AaSubsIndelEvents
+                | DistanceMode::AaSubsIndelResidues => unreachable!(),
             };
 
             // Apply Hamming fallback ONLY for SNPs mode: if alignment found 0 differences
@@ -579,12 +610,6 @@ impl DistanceEngine {
 
         // Cache miss - this should not happen if pre-computation worked
         // (Silent - individual misses not logged to reduce verbosity)
-
-        // Cache miss (pair could not be aligned): in custom mode only the
-        // allele term applies
-        if mode == DistanceMode::Weighted {
-            return self.weights.allele as usize;
-        }
 
         // Cache miss - apply Hamming fallback ONLY for SNPs mode and when enabled
         if no_hamming_fallback {
@@ -753,6 +778,10 @@ impl DistanceEngine {
                 DistanceMode::Hamming => "hamming".to_string(),
                 DistanceMode::NonsynSnps => "nonsyn-snps".to_string(),
                 DistanceMode::Weighted => "custom".to_string(),
+                DistanceMode::AaHamming => "aa-hamming".to_string(),
+                DistanceMode::AaSubs => "aa-substitutions".to_string(),
+                DistanceMode::AaSubsIndelEvents => "aa-substitutions-indel-events".to_string(),
+                DistanceMode::AaSubsIndelResidues => "aa-substitutions-indel-residues".to_string(),
             },
             user_note,
             total_entries: self.cache.len(),
@@ -1070,6 +1099,7 @@ impl DistanceEngine {
         // must never write placeholder statistics into the cache: a later
         // SNP/InDel run would read them back as real alignment results.
         if matches!(mode, DistanceMode::Hamming)
+            || mode.is_protein()
             || (mode == DistanceMode::Weighted && !self.weights.needs_alignment())
         {
             println!("🎯 Hamming mode: no alignments needed ({total_pairs} allele pairs)");
@@ -1792,6 +1822,47 @@ impl DistanceEngine {
     /// Weights used by DistanceMode::Weighted.
     pub fn set_weights(&mut self, weights: DistanceWeights) {
         self.weights = weights;
+    }
+
+    /// Enable protein-level results (protein modes, aa_* weights).
+    pub fn set_protein_store(&mut self, store: ProteinStore) {
+        self.protein = Some(store);
+    }
+
+    pub fn protein_store(&self) -> Option<&ProteinStore> {
+        self.protein.as_ref()
+    }
+
+    pub fn protein_store_mut(&mut self) -> Option<&mut ProteinStore> {
+        self.protein.as_mut()
+    }
+
+    /// Translate the run's alleles and align the missing protein pairs.
+    pub fn precompute_proteins(
+        &mut self,
+        unique_pairs: &HashSet<(String, u32, u32)>,
+    ) -> Result<(), String> {
+        let (Some(store), Some(db)) = (self.protein.as_mut(), self.sequence_db.as_ref()) else {
+            return Ok(());
+        };
+        store.precompute(db, unique_pairs)
+    }
+
+    /// Protein-level terms of an allele pair (alleles present and different):
+    /// (proteins differ, substitutions, InDel events, InDel residues);
+    /// all zero if a protein is unknown.
+    fn protein_terms(&self, locus: &str, crc1: u32, crc2: u32) -> (usize, usize, usize, usize) {
+        let (lo, hi) = (crc1.min(crc2), crc1.max(crc2));
+        match self.protein.as_ref().and_then(|p| p.lookup(locus, lo, hi)) {
+            Some(Some(pp)) => (
+                1,
+                pp.aa_subs as usize,
+                pp.aa_indel_events as usize,
+                pp.aa_indel_residues as usize,
+            ),
+            // same protein, or protein unknown
+            _ => (0, 0, 0, 0),
+        }
     }
 
     /// Re-check a deterministic fraction of new alignments against parasail's

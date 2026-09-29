@@ -3,6 +3,7 @@
 use crate::cli::args::Args;
 use crate::core::alignment::DistanceWeights;
 use crate::core::protein::GeneticCode;
+use crate::core::protein_distance::ProteinSettings;
 use crate::core::{AlignmentConfig, DistanceMode};
 use crate::hashers::HasherRegistry;
 use regex::Regex;
@@ -17,6 +18,8 @@ pub struct ValidationResult {
     pub weights: DistanceWeights,
     /// genetic code for synonymous/nonsynonymous counts, when needed
     pub coding: Option<GeneticCode>,
+    /// protein-level settings, when a protein mode or aa_* weight is used
+    pub protein: Option<ProteinSettings>,
     pub alignment_config: AlignmentConfig,
     pub sample_include_regex: Option<Regex>,
     pub sample_exclude_regex: Option<Regex>,
@@ -85,6 +88,27 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
             !args.no_first_codon_as_met,
         )?)
     } else {
+        None
+    };
+    let protein = if distance_mode.is_protein() || weights.needs_protein() {
+        let settings = ProteinSettings {
+            translation_table: args.translation_table,
+            first_codon_as_met: !args.no_first_codon_as_met,
+            matrix: args.aa_matrix.clone(),
+            gap_open: args.aa_gap_open,
+            gap_extend: args.aa_gap_extend,
+        };
+        settings.validate()?;
+        if args.hasher_type == "hamming" {
+            return Err("protein-level modes need allele sequences; they are not available with --hasher-type hamming".to_string());
+        }
+        Some(settings)
+    } else {
+        if args.protein_cache_file.is_some() {
+            return Err(
+                "--protein-cache-file is only used with aa-* modes or aa_* weights".to_string(),
+            );
+        }
         None
     };
     if coding.is_some() && args.hasher_type == "hamming" {
@@ -218,6 +242,7 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
         distance_mode,
         weights,
         coding,
+        protein,
         alignment_config,
         sample_include_regex,
         sample_exclude_regex,
