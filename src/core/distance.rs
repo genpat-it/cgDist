@@ -698,6 +698,7 @@ impl DistanceEngine {
         );
 
         let start_compute = Instant::now();
+        let requested: Vec<&(String, u32, u32)> = missing_pairs.clone();
 
         // Simple progress tracking - update every N completions
         let completed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -752,18 +753,84 @@ impl DistanceEngine {
 
         let compute_elapsed = start_compute.elapsed();
 
+        // Pairs that could not be aligned are never cached, so they are
+        // reported on every run until the schema is fixed.
+        let unaligned: Vec<&(String, u32, u32)> = requested
+            .into_iter()
+            .filter(|(locus, c1, c2)| {
+                !self.cache.contains_key(&DistanceCacheKey {
+                    locus: locus.clone(),
+                    crc1: (*c1).min(*c2),
+                    crc2: (*c1).max(*c2),
+                })
+            })
+            .collect();
+        let aligned_count = missing_count - unaligned.len();
+
         println!("🚀 Cache-aware precompute completed:");
         println!(
             "   ⚡ Computed {} new alignments in {:.2}s ({:.0} alignments/sec)",
-            missing_count,
+            aligned_count,
             compute_elapsed.as_secs_f64(),
-            missing_count as f64 / compute_elapsed.as_secs_f64()
+            aligned_count as f64 / compute_elapsed.as_secs_f64()
         );
+        if !unaligned.is_empty() {
+            self.report_unaligned(&unaligned, total_pairs);
+        }
         println!(
             "   📈 Total efficiency: {:.1}% time saved vs full recompute",
             (cached_pairs as f64 / total_pairs as f64) * 100.0
         );
         println!("   💾 Cache now contains {} entries", self.cache.len());
+    }
+
+    /// Warn about allele pairs that could not be aligned. They fall back to
+    /// the cache-miss rule in `get_distance`, which undercounts differences.
+    fn report_unaligned(&self, unaligned: &[&(String, u32, u32)], total_pairs: usize) {
+        let mut absent: HashSet<(&str, u32)> = HashSet::new();
+        let mut per_locus: HashMap<&str, usize> = HashMap::new();
+        for (locus, c1, c2) in unaligned {
+            *per_locus.entry(locus.as_str()).or_default() += 1;
+            for c in [*c1, *c2] {
+                let known = self
+                    .sequence_db
+                    .as_ref()
+                    .is_some_and(|db| db.get_sequence(locus, c).is_some());
+                if !known {
+                    absent.insert((locus.as_str(), c));
+                }
+            }
+        }
+        let mut loci: Vec<(&str, usize)> = per_locus.into_iter().collect();
+        loci.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        let examples: Vec<String> = loci
+            .iter()
+            .take(5)
+            .map(|(l, n)| format!("{l} ({n})"))
+            .collect();
+
+        eprintln!(
+            "⚠️  WARNING: {} of {} allele pairs ({:.1}%) in {} loci could NOT be aligned.",
+            unaligned.len(),
+            total_pairs,
+            unaligned.len() as f64 / total_pairs.max(1) as f64 * 100.0,
+            loci.len()
+        );
+        if !absent.is_empty() {
+            eprintln!(
+                "   {} allele(s) found in the profiles have no sequence in the schema FASTA \
+                 (profiles called with a newer or different schema?).",
+                absent.len()
+            );
+        }
+        eprintln!(
+            "   These pairs count as 0 (1 in snps mode with --hamming-fallback), so distances \
+             involving them are underestimated."
+        );
+        eprintln!("   Most affected loci: {}", examples.join(", "));
+        eprintln!(
+            "   Fix: use the schema the profiles were called with (including novel alleles)."
+        );
     }
 
     /// Compute a single alignment (used in batch processing)  

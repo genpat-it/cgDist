@@ -55,6 +55,13 @@ article's results are not affected.)
 - `recombination_candidate_analyzer` now refuses a cache without sequence
   lengths (instead of reporting zero candidates) and warns when only some
   entries have them.
+- Allele pairs that cannot be aligned (an allele in the profiles has no
+  sequence in the schema FASTA, e.g. profiles called with a newer or different
+  schema) are now reported on every run with a warning giving their number,
+  the affected loci and the effect: such pairs count as 0 (1 in snps mode with
+  `--hamming-fallback`), so distances involving them are underestimated.
+  Previously this happened silently and the log counted these pairs as
+  computed alignments. Distances are unchanged.
 - Cache compatibility compares the numeric alignment parameters only; a cache
   built with a preset and one built with identical custom parameters are now
   interchangeable.
