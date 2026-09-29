@@ -53,6 +53,19 @@ fn main() {
             }
         }
     }
+    // TIMING: cgdist protein alignment alone, single thread
+    let t = std::time::Instant::now();
+    let take = pairs.len().min(20_000);
+    for (a, b) in &pairs[..take] {
+        std::hint::black_box(align_proteins(&settings, a, b));
+    }
+    let per = t.elapsed().as_secs_f64() / take as f64 * 1e6;
+    let mean_len: f64 = pairs[..take]
+        .iter()
+        .map(|(a, b)| (a.len() + b.len()) as f64 / 2.0)
+        .sum::<f64>()
+        / take as f64;
+    println!("TIMING: {per:.1} us per protein pair (mean length {mean_len:.0} aa, single thread)");
     let bad = pairs
         .par_iter()
         .filter(|(a, b)| {
