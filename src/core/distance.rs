@@ -95,11 +95,56 @@ pub struct CacheMetadata {
 }
 
 // Legacy support for old inspector format
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct DistanceCacheKey {
     locus: String,
     crc1: u32,
     crc2: u32,
+}
+
+/// Borrowed view of a cache key, so lookups by (&str, u32, u32) need no
+/// String allocation. Hash and equality are defined on the same parts for
+/// the owned key and every view, as `HashMap`'s `Borrow` contract requires.
+trait KeyView {
+    fn parts(&self) -> (&str, u32, u32);
+}
+
+impl KeyView for DistanceCacheKey {
+    fn parts(&self) -> (&str, u32, u32) {
+        (&self.locus, self.crc1, self.crc2)
+    }
+}
+
+impl KeyView for (&str, u32, u32) {
+    fn parts(&self) -> (&str, u32, u32) {
+        (self.0, self.1, self.2)
+    }
+}
+
+impl<'a> std::borrow::Borrow<dyn KeyView + 'a> for DistanceCacheKey {
+    fn borrow(&self) -> &(dyn KeyView + 'a) {
+        self
+    }
+}
+
+impl std::hash::Hash for dyn KeyView + '_ {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.parts().hash(state)
+    }
+}
+
+impl PartialEq for dyn KeyView + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.parts() == other.parts()
+    }
+}
+
+impl Eq for dyn KeyView + '_ {}
+
+impl std::hash::Hash for DistanceCacheKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.parts().hash(state)
+    }
 }
 
 thread_local! {
@@ -309,14 +354,7 @@ impl DistanceEngine {
             (crc2, crc1)
         };
 
-        // Use a temporary key for lookup - still allocates but only on cache miss
-        let temp_key = DistanceCacheKey {
-            locus: locus.to_string(),
-            crc1: min_crc,
-            crc2: max_crc,
-        };
-
-        if let Some(&entry) = self.cache.get(&temp_key) {
+        if let Some(&entry) = self.cache.get(&(locus, min_crc, max_crc) as &dyn KeyView) {
             let distance = match mode {
                 DistanceMode::SnpsOnly => entry.snps,
                 DistanceMode::SnpsAndIndelEvents => entry.snps + entry.indel_events,
@@ -379,12 +417,7 @@ impl DistanceEngine {
         } else {
             (crc2, crc1)
         };
-        let key = DistanceCacheKey {
-            locus: locus.to_string(),
-            crc1: min_crc,
-            crc2: max_crc,
-        };
-        let entry = self.cache.get(&key)?;
+        let entry = self.cache.get(&(locus, min_crc, max_crc) as &dyn KeyView)?;
         let len = entry.mean_len()?;
         if len == 0 {
             return None;
@@ -797,12 +830,9 @@ impl DistanceEngine {
                 } else {
                     (*crc2, *crc1)
                 };
-                let key = DistanceCacheKey {
-                    locus: locus.clone(),
-                    crc1: min_crc,
-                    crc2: max_crc,
-                };
-                !self.cache.contains_key(&key)
+                !self
+                    .cache
+                    .contains_key(&(locus.as_str(), min_crc, max_crc) as &dyn KeyView)
             })
             .collect();
 
