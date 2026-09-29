@@ -104,7 +104,7 @@ notice — existing scripts continue to work.
 To pin a specific published version:
 
 ```bash
-cargo install cgdist --version 0.1.3
+cargo install cgdist --version 0.1.4
 ```
 
 For a fully reproducible build that uses exactly the dependency
@@ -125,7 +125,7 @@ citing the manuscript:
 
 ```bash
 # Specific release tag
-cargo install --git https://github.com/genpat-it/cgDist --tag v0.1.3 cgdist
+cargo install --git https://github.com/genpat-it/cgDist --tag v0.1.4 cgdist
 
 # Latest state on the default branch
 cargo install --git https://github.com/genpat-it/cgDist cgdist
@@ -144,14 +144,14 @@ Container Registry on every release:
 
 ```bash
 # Pull the public image (no authentication required)
-docker pull ghcr.io/genpat-it/cgdist:0.1.3
+docker pull ghcr.io/genpat-it/cgdist:0.1.4
 # or pin to the minor / major series:
 # docker pull ghcr.io/genpat-it/cgdist:0.1
 # docker pull ghcr.io/genpat-it/cgdist:latest   # tracks master HEAD
 
 # Run with the image (mount your working directory at /data).
 # The image's ENTRYPOINT is `cgdist`, so flags are passed directly:
-docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.1.3 \
+docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.1.4 \
     --schema /data/schema_dir --profiles /data/profiles.tsv \
     --output /data/distances.tsv --mode snps-indel-bases
 ```
@@ -450,7 +450,8 @@ workflow described in the paper (Supplementary §S6).
 ```bash
 # Step 1: build an enriched cache alongside the distance matrix.
 # On a freshly created cache, --enrich-lengths records the sequence lengths
-# in place, so a single cgdist run is enough.
+# in place, so a single cgdist run is enough (requires cgdist >= 0.1.4; older
+# versions dropped the lengths in this case - see CHANGELOG 0.1.4).
 cgdist --schema schema_dir/ --profiles profiles.tsv --output distances.tsv \
     --mode snps-indel-bases --cache-file cache.bin --enrich-lengths
 
