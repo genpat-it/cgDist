@@ -483,7 +483,18 @@ cache      snps=36  indel_events=1  indel_bases=3  -> MATCH
 ```
 
 Allele 1 is the one with the smaller hash, as in the cache. `INS`/`DEL` are
-relative to allele 1. `--tsv` prints the same list as a table, and
+relative to allele 1.
+
+Each difference is also annotated at protein level, using translation table
+11, with the first codon read as Met:
+
+* each SNP gets its codon and effect: `synonymous`, `missense`, `nonsense`,
+  `stop_lost`, `start_lost`, or `frame_disrupted` when an InDel shifts or
+  splits the codon. The protein change is numbered on allele 1, e.g.
+  `p.Glu243Asp`;
+* each InDel is marked `in_frame` or `frameshift`;
+* a summary gives the synonymous/nonsynonymous counts and says whether the
+  two proteins are identical. `--tsv` prints the same list as a table, and
 `--cache-file` checks the counts against the cache entry (exit code 2 on a
 mismatch).
 

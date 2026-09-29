@@ -9,6 +9,7 @@ use argh::FromArgs;
 use bio::io::fasta;
 use cgdist::core::alignment::{cigar_from_aligned, AlignmentConfig};
 use cgdist::core::distance::{align_pair_with_strings, ModernCache};
+use cgdist::core::protein::{self, SnpAnnotation, SnpEffect};
 use std::path::Path;
 
 #[derive(FromArgs)]
@@ -232,11 +233,36 @@ fn run(args: Args) -> Result<i32, String> {
     let diffs = differences(aln.query.as_bytes(), aln.reference.as_bytes());
     let cigar = cigar_from_aligned(aln.query.as_bytes(), aln.reference.as_bytes());
 
+    // coding effects (translation table 11); positions in `Diff` are 1-based
+    let map = protein::map_allele1_to_allele2(aln.query.as_bytes(), aln.reference.as_bytes());
+    let snp_ann: Vec<Option<SnpAnnotation>> = diffs
+        .iter()
+        .map(|d| {
+            (d.kind == "SNP").then(|| protein::classify_snp(&s1, &s2, &map, d.a1.0 - 1, d.a2.0 - 1))
+        })
+        .collect();
+    let effect_of = |i: usize| -> String {
+        let d = &diffs[i];
+        match &snp_ann[i] {
+            Some(a) => a.effect.label().to_string(),
+            None => protein::indel_effect(d.bases1.len().max(d.bases2.len())).to_string(),
+        }
+    };
+    let (prot1, prot2) = (protein::translate(&s1), protein::translate(&s2));
+
     if args.tsv {
-        println!("type\tevent\tallele1_start\tallele1_end\tallele2_start\tallele2_end\tallele1_bases\tallele2_bases");
-        for d in &diffs {
+        println!("type\tevent\tallele1_start\tallele1_end\tallele2_start\tallele2_end\tallele1_bases\tallele2_bases\teffect\tcodon1\tcodon2\tprotein_change");
+        for (i, d) in diffs.iter().enumerate() {
+            let (c1, c2, pc) = match &snp_ann[i] {
+                Some(a) => (
+                    format!("{}:{}", a.codon1, a.codon_seq1),
+                    format!("{}:{}", a.codon2, a.codon_seq2),
+                    a.protein_change(),
+                ),
+                None => ("-".into(), "-".into(), "-".into()),
+            };
             println!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 d.kind,
                 d.event,
                 d.a1.0,
@@ -244,7 +270,11 @@ fn run(args: Args) -> Result<i32, String> {
                 d.a2.0,
                 d.a2.1,
                 if d.bases1.is_empty() { "-" } else { &d.bases1 },
-                if d.bases2.is_empty() { "-" } else { &d.bases2 }
+                if d.bases2.is_empty() { "-" } else { &d.bases2 },
+                effect_of(i),
+                c1,
+                c2,
+                pc
             );
         }
     } else {
@@ -272,6 +302,32 @@ fn run(args: Args) -> Result<i32, String> {
         println!(
             "           bases only in allele 2 (INS): {ins}   bases only in allele 1 (DEL): {del}"
         );
+        let count = |e: SnpEffect| snp_ann.iter().flatten().filter(|a| a.effect == e).count();
+        let nonsyn = snp_ann
+            .iter()
+            .flatten()
+            .filter(|a| a.effect.is_nonsynonymous())
+            .count();
+        println!(
+            "coding     synonymous={}  nonsynonymous={} (missense={} nonsense={} stop_lost={} start_lost={})  frame_disrupted={}",
+            count(SnpEffect::Synonymous),
+            nonsyn,
+            count(SnpEffect::Missense),
+            count(SnpEffect::Nonsense),
+            count(SnpEffect::StopLost),
+            count(SnpEffect::StartLost),
+            count(SnpEffect::FrameDisrupted)
+        );
+        println!(
+            "protein    allele1 {} aa  allele2 {} aa  {}",
+            prot1.len(),
+            prot2.len(),
+            if prot1 == prot2 {
+                "identical proteins"
+            } else {
+                "proteins differ"
+            }
+        );
         println!("cigar      {cigar}");
         println!(
             "           (INS/DEL are relative to allele 1: INS = bases only in allele 2, \
@@ -281,29 +337,42 @@ fn run(args: Args) -> Result<i32, String> {
         if !diffs.is_empty() {
             println!();
         }
-        for d in &diffs {
+        for (i, d) in diffs.iter().enumerate() {
             match d.kind {
-                "SNP" => println!(
-                    "SNP        allele1 {:>6} {}  ->  allele2 {:>6} {}",
-                    d.a1.0, d.bases1, d.a2.0, d.bases2
-                ),
+                "SNP" => {
+                    let a = snp_ann[i].as_ref().unwrap();
+                    println!(
+                        "SNP        allele1 {:>6} {}  ->  allele2 {:>6} {}   codon {} {}>{}  {:<16} {}",
+                        d.a1.0,
+                        d.bases1,
+                        d.a2.0,
+                        d.bases2,
+                        a.codon1,
+                        a.codon_seq1,
+                        a.codon_seq2,
+                        a.effect.label(),
+                        a.protein_change()
+                    )
+                }
                 "INS" => println!(
-                    "INS #{:<4}  after allele1 {:>6}  allele2 {}-{}  +{} ({} bp)",
+                    "INS #{:<4}  after allele1 {:>6}  allele2 {}-{}  +{} ({} bp, {})",
                     d.event,
                     d.a1.0,
                     d.a2.0,
                     d.a2.1,
                     d.bases2,
-                    d.bases2.len()
+                    d.bases2.len(),
+                    effect_of(i)
                 ),
                 _ => println!(
-                    "DEL #{:<4}  allele1 {}-{}  after allele2 {:>6}  -{} ({} bp)",
+                    "DEL #{:<4}  allele1 {}-{}  after allele2 {:>6}  -{} ({} bp, {})",
                     d.event,
                     d.a1.0,
                     d.a1.1,
                     d.a2.0,
                     d.bases1,
-                    d.bases1.len()
+                    d.bases1.len(),
+                    effect_of(i)
                 ),
             }
         }
