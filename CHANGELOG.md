@@ -34,7 +34,9 @@ You are affected only if one cache file was used both with `--mode hamming`
 and with an SNP/InDel mode. Delete such caches, or rebuild them with
 `--force-recompute`; SNP/InDel matrices computed from them should be
 regenerated. cgdist now prints a warning when it loads a cache last written in
-Hamming mode by a version ≤ 0.1.3. Runs using the `hamming` hasher, separate
+Hamming mode by a version ≤ 0.1.3; it cannot detect a cache that a later
+SNP/InDel run saved again, so check your workflows rather than relying on the
+warning alone. Runs using the `hamming` hasher, separate
 caches per mode, or no cache were never affected. (The Hamming distances in the
 cgDist article were computed with an external tool, cgmlst-dists, so the
 article's results are not affected.)
