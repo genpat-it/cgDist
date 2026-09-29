@@ -460,6 +460,10 @@ fn run_main() -> Result<(), String> {
         } else {
             println!("⚠️  Warning: No cache file specified - computed alignments not saved");
         }
+        // --save-alignments is honoured in cache-only mode too
+        if let Err(e) = engine.save_alignments() {
+            eprintln!("⚠️  Warning: Failed to save alignment details: {e}");
+        }
         let total_elapsed = total_start.elapsed();
         println!(
             "\n⏱️  Total execution time: {:.2}s",

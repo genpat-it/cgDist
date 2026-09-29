@@ -165,8 +165,12 @@ of parity `k & 1`. It relies on these invariants:
 * The AVX2 kernel performs the same operations as the portable kernel, 8
   cells at a time. The portable kernel is used on CPUs without AVX2 and on
   ARM. Both are verified to be identical.
-* Pairs with a NUL byte are left to parasail, as are pairs with
-  `--save-alignments`, which needs the aligned strings.
+* Pairs with a NUL byte are left to parasail. For `--save-alignments` the
+  band's traceback also writes the gapped strings, exactly as parasail's
+  traceback template builds them: original bytes, `-` in the query on
+  insertions and in the reference on deletions, built backwards and then
+  reversed. The path is the same, so the strings are the same. This is used
+  only for ASCII sequences, because the parasail binding requires UTF-8.
 
 **16-bit kernel.** With AVX2, cgDist uses a kernel with 16 x i16 lanes and
 saturating arithmetic whenever `fits_i16(n, m, scoring)` holds. It is exact
@@ -214,7 +218,9 @@ The evidence:
 | Exhaustive: **every** pair over {A,C,G,T,N} up to length 5, all 3 presets, **every** band width; AVX2 i16, AVX2 i32, portable i32 and row-major implementations, parasail scan-16, all against parasail's original `nw_trace_striped_sat` | 15.2 M pairs, 272.6 M band checks | **0** |
 | Exhaustive: every pair over {A,C,G,T} up to length 6 | 29.8 M pairs, 620.1 M band checks | **0** |
 | Exhaustive: every pair over {A,C,G,T,a} up to length 4 (lower-case scoring vs byte-wise SNP counting) | 0.6 M pairs, 9.1 M band checks | **0** |
+| Gapped alignment strings (`--save-alignments`), exhaustive spaces above, vs parasail's `get_traceback_strings` | same pairs | **0** |
 | Real allele pairs, L. monocytogenes and S. enterica | 739,554 pairs | **0** |
+| `--save-alignments` files vs cgdist 0.1.4, both datasets | 739,554 rows | byte-identical |
 | Adversarial fuzzing (tandem repeats, homopolymers, N, lower case, large length differences, unrelated sequences), 3 presets, two seeds | 400,000 cases, 218,237 certified | **0** |
 | Full runs with `--verify-alignments 1` (every pair re-checked in production) | both datasets | **0** |
 | Distance matrices and cache contents vs cgdist 0.1.4 | both datasets, all modes | identical |

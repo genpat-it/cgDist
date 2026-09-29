@@ -30,8 +30,17 @@ until the API stabilizes).
   (L. monocytogenes, 300 samples), 153 s -> 3.9 s (S. enterica, 120 samples);
   the alignment step itself is 120-140x faster per pair.
 
+- `--save-alignments` uses the certified banded alignment too: it writes the
+  same gapped strings as parasail, and the file content is byte-identical to
+  0.1.4. Rows are now written as they are produced instead of being held in
+  memory until the end: peak memory 2.9 GB -> 0.5 GB (L. monocytogenes, 300
+  samples) and 5.5 GB -> 1.3 GB (S. enterica, 120 samples); run time
+  72 s -> 2.4 s and 153 s -> 4.7 s.
+
 ### Fixed
 
+- `--save-alignments` was silently ignored with `--cache-only`; the file is
+  now written in that mode too.
 - Cache enrichment looked up allele lengths in one CRC32 map for the whole
   schema. CRC32 values collide across loci of large schemas (906 colliding
   CRCs with different lengths in the S. enterica schema), so some entries

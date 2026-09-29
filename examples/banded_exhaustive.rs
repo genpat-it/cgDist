@@ -10,13 +10,17 @@
 //     the band is certified, and every certified result equals the reference;
 //   * align_certified (the production entry point) equals the reference;
 //   * parasail's scan 16-bit kernel (production fallback) equals the reference;
+//   * the gapped alignment strings from the band (used by --save-alignments)
+//     are byte-identical to parasail's get_traceback_strings;
 //   * the lower bound never exceeds the optimal score.
 //
 //   cargo run --release --example banded_exhaustive -- <alphabet> <max_len>
 //   e.g. ACGTN 5    ACGT 6    ACGTa 4
 
 use cgdist::core::alignment::compute_alignment_stats;
-use cgdist::core::banded::{align_certified, verify, BandedStats, Scoring};
+use cgdist::core::banded::{
+    align_certified, align_certified_with_strings, verify, BandedStats, Scoring,
+};
 use parasail_rs::{Aligner, Matrix};
 use rayon::prelude::*;
 use std::cell::RefCell;
@@ -62,16 +66,21 @@ fn build(s: &Scoring, scan16: bool) -> Aligner {
 }
 
 fn stats(a: &Aligner, q: &[u8], r: &[u8]) -> BandedStats {
+    stats_and_strings(a, q, r).0
+}
+
+fn stats_and_strings(a: &Aligner, q: &[u8], r: &[u8]) -> (BandedStats, String, String) {
     let res = a.align(Some(q), r).unwrap();
     assert!(!res.is_saturated());
     let tb = res.get_traceback_strings(q, r).unwrap();
     let (snps, indel_events, indel_bases) = compute_alignment_stats(&tb.query, &tb.reference);
-    BandedStats {
+    let b = BandedStats {
         snps,
         indel_events,
         indel_bases,
         score: res.get_score(),
-    }
+    };
+    (b, tb.query, tb.reference)
 }
 
 fn all_seqs(alpha: &[u8], max_len: usize) -> Vec<Vec<u8>> {
@@ -127,7 +136,7 @@ fn main() {
             let mut local_cert = 0u64;
             for r in &seqs {
                 for (pi, s) in PRESETS.iter().enumerate() {
-                    let want = stats(&al[pi].0, q, r);
+                    let (want, want_q, want_r) = stats_and_strings(&al[pi].0, q, r);
                     let fail = |what: &str| {
                         failures.fetch_add(1, Ordering::Relaxed);
                         eprintln!(
@@ -145,6 +154,14 @@ fn main() {
                         Some(_) => {}
                         None => {
                             fallbacks.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                    if let Some((b, st)) = align_certified_with_strings(q, r, s, 1.0) {
+                        if b != want
+                            || st.query != want_q.as_bytes()
+                            || st.reference != want_r.as_bytes()
+                        {
+                            fail("aligned strings differ from parasail");
                         }
                     }
                     if verify::lower_bound(q, r, s) > want.score as i64 {

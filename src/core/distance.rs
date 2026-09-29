@@ -1,7 +1,7 @@
 // distance.rs - Core distance calculation engine
 
 use crate::core::alignment::{compute_alignment_stats, AlignmentConfig, DistanceMode};
-use crate::core::banded::{align_certified, Scoring};
+use crate::core::banded::{align_certified, align_certified_with_strings, Scoring};
 use crate::data::{AllelicProfile, SequenceDatabase};
 use crate::hashers::{AlleleHasher, HasherRegistry};
 use chrono;
@@ -50,7 +50,11 @@ pub struct DistanceEngine {
     save_alignments_path: Option<String>,
     // Fraction of new alignments re-checked against parasail's original kernel
     verify_fraction: f64,
-    alignment_details: Vec<String>, // TSV lines to write
+    // --save-alignments output, opened on the first row and written as rows
+    // are produced
+    alignment_writer: Option<std::io::BufWriter<std::fs::File>>,
+    alignment_rows: usize,
+    alignment_error: Option<String>,
 }
 
 /// Modern cache structure supporting any hasher type
@@ -294,7 +298,9 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
-            alignment_details: Vec::new(),
+            alignment_writer: None,
+            alignment_rows: 0,
+            alignment_error: None,
         }
     }
 
@@ -312,7 +318,9 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
-            alignment_details: Vec::new(),
+            alignment_writer: None,
+            alignment_rows: 0,
+            alignment_error: None,
         }
     }
 
@@ -878,75 +886,86 @@ impl DistanceEngine {
         // Compute alignments with periodic progress updates. Allele lengths
         // (known because both sequences were just aligned) are gathered in the
         // parallel part too, so the serial merge below is one insert per pair.
-        #[allow(clippy::type_complexity)]
-        let results: Vec<(
-            &(String, u32, u32),
-            Option<(
-                usize,
-                usize,
-                usize,
-                (Option<u32>, Option<u32>),
-                Option<String>,
-            )>,
-        )> = missing_pairs
-            .into_par_iter()
-            .map(|pair| {
-                let (locus, crc1, crc2) = pair;
-                let alignment_result = self.compute_single_alignment(locus, *crc1, *crc2);
-
-                // Increment and check if we should update progress
-                let completed =
-                    completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                if completed % update_frequency == 0 {
-                    pb.set_position(completed as u64);
-                }
-
-                let with_lens =
-                    alignment_result.map(|(snps, indel_events, indel_bases, detail)| {
-                        let (lo, hi) = ((*crc1).min(*crc2), (*crc1).max(*crc2));
-                        let lens = self.sequence_db.as_ref().map_or((None, None), |db| {
-                            (
-                                db.get_sequence(locus, lo).map(|s| s.sequence.len() as u32),
-                                db.get_sequence(locus, hi).map(|s| s.sequence.len() as u32),
-                            )
-                        });
-                        (snps, indel_events, indel_bases, lens, detail)
-                    });
-                (pair, with_lens)
-            })
-            .collect();
-
-        pb.finish_with_message("✅ Missing alignments computed!");
-
-        // Store results in cache (and collect alignment detail rows for
-        // --save-alignments). Pairs that could not be aligned are never
-        // cached, so they are reported on every run until the schema is fixed.
+        // With --save-alignments the pairs are processed in chunks whose rows
+        // are written out right away (same rows, same order), so memory does
+        // not grow with the number of saved alignments.
+        let chunk_size = if self.save_alignments_path.is_some() {
+            20_000
+        } else {
+            missing_pairs.len().max(1)
+        };
         let mut unaligned: Vec<&(String, u32, u32)> = Vec::new();
-        for (pair, res) in results {
-            let (locus, crc1, crc2) = pair;
-            match res {
-                Some((snps, indel_events, indel_bases, lens, detail)) => {
-                    self.cache.insert(
-                        DistanceCacheKey {
-                            locus: locus.clone(),
-                            crc1: (*crc1).min(*crc2),
-                            crc2: (*crc1).max(*crc2),
-                        },
-                        CacheEntry {
-                            snps,
-                            indel_events,
-                            indel_bases,
-                            lens,
-                        },
-                    );
-                    self.has_new_entries = true;
-                    if let Some(row) = detail {
-                        self.alignment_details.push(row);
+        for chunk in missing_pairs.chunks(chunk_size) {
+            #[allow(clippy::type_complexity)]
+            let results: Vec<(
+                &(String, u32, u32),
+                Option<(
+                    usize,
+                    usize,
+                    usize,
+                    (Option<u32>, Option<u32>),
+                    Option<String>,
+                )>,
+            )> = chunk
+                .par_iter()
+                .map(|&pair| {
+                    let (locus, crc1, crc2) = pair;
+                    let alignment_result = self.compute_single_alignment(locus, *crc1, *crc2);
+
+                    // Increment and check if we should update progress
+                    let completed =
+                        completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if completed % update_frequency == 0 {
+                        pb.set_position(completed as u64);
                     }
+
+                    let with_lens =
+                        alignment_result.map(|(snps, indel_events, indel_bases, detail)| {
+                            let (lo, hi) = ((*crc1).min(*crc2), (*crc1).max(*crc2));
+                            let lens = self.sequence_db.as_ref().map_or((None, None), |db| {
+                                (
+                                    db.get_sequence(locus, lo).map(|s| s.sequence.len() as u32),
+                                    db.get_sequence(locus, hi).map(|s| s.sequence.len() as u32),
+                                )
+                            });
+                            (snps, indel_events, indel_bases, lens, detail)
+                        });
+                    (pair, with_lens)
+                })
+                .collect();
+
+            // Store results in cache (and write alignment detail rows for
+            // --save-alignments). Pairs that could not be aligned are never
+            // cached, so they are reported on every run until the schema is
+            // fixed.
+            for (pair, res) in results {
+                let (locus, crc1, crc2) = pair;
+                match res {
+                    Some((snps, indel_events, indel_bases, lens, detail)) => {
+                        self.cache.insert(
+                            DistanceCacheKey {
+                                locus: locus.clone(),
+                                crc1: (*crc1).min(*crc2),
+                                crc2: (*crc1).max(*crc2),
+                            },
+                            CacheEntry {
+                                snps,
+                                indel_events,
+                                indel_bases,
+                                lens,
+                            },
+                        );
+                        self.has_new_entries = true;
+                        if let Some(row) = detail {
+                            self.write_alignment_row(&row);
+                        }
+                    }
+                    None => unaligned.push(pair),
                 }
-                None => unaligned.push(pair),
             }
         }
+
+        pb.finish_with_message("✅ Missing alignments computed!");
 
         let compute_elapsed = start_compute.elapsed();
         let aligned_count = missing_count - unaligned.len();
@@ -1071,23 +1090,47 @@ impl DistanceEngine {
                 seq_db.get_sequence(locus, crc2),
             ) {
                 // Fast path: certified banded alignment, bit-identical to
-                // parasail (see core::banded). It yields statistics only, so
-                // --save-alignments keeps the parasail path. Sequences with a
-                // NUL byte are left to parasail too, whose C-string handling
-                // makes them fail over to analyze_sequences.
-                if self.save_alignments_path.is_none()
-                    && !seq1.sequence.contains(&0)
-                    && !seq2.sequence.contains(&0)
-                {
+                // parasail (see core::banded). Sequences with a NUL byte are
+                // left to parasail, whose C-string handling makes them fail
+                // over to analyze_sequences.
+                if !seq1.sequence.contains(&0) && !seq2.sequence.contains(&0) {
                     let scoring = Scoring {
                         match_score: self.config.match_score,
                         mismatch: self.config.mismatch_penalty,
                         gap_open: self.config.gap_open,
                         gap_extend: self.config.gap_extend,
                     };
-                    if let Some(b) = align_certified(&seq1.sequence, &seq2.sequence, &scoring, 0.5)
-                    {
-                        return Some((b.snps, b.indel_events, b.indel_bases, None));
+                    if self.save_alignments_path.is_none() {
+                        if let Some(b) =
+                            align_certified(&seq1.sequence, &seq2.sequence, &scoring, 0.5)
+                        {
+                            return Some((b.snps, b.indel_events, b.indel_bases, None));
+                        }
+                    } else if seq1.sequence.is_ascii() && seq2.sequence.is_ascii() {
+                        // --save-alignments: the band's traceback yields the
+                        // same gapped strings as parasail's (ASCII only: the
+                        // parasail binding requires UTF-8). Statistics and the
+                        // row are then built exactly as on the parasail path.
+                        if let Some((b, st)) = align_certified_with_strings(
+                            &seq1.sequence,
+                            &seq2.sequence,
+                            &scoring,
+                            0.5,
+                        ) {
+                            let query = String::from_utf8_lossy(&st.query);
+                            let reference = String::from_utf8_lossy(&st.reference);
+                            let (snps, indel_events, indel_bases) =
+                                compute_alignment_stats(&query, &reference);
+                            let detail = format!(
+                                "{locus}\t{crc1}\t{crc2}\t{}\t{}\t{}\t{}\t{snps}\t{indel_events}\t{indel_bases}\t{:.2}",
+                                String::from_utf8_lossy(&seq1.sequence),
+                                String::from_utf8_lossy(&seq2.sequence),
+                                query,
+                                reference,
+                                b.score as f32,
+                            );
+                            return Some((snps, indel_events, indel_bases, Some(detail)));
+                        }
                     }
                 }
 
@@ -1463,25 +1506,76 @@ impl DistanceEngine {
 
     pub fn set_save_alignments(&mut self, path: String) {
         self.save_alignments_path = Some(path);
-        // Initialize with TSV header
-        self.alignment_details.clear();
-        self.alignment_details.push("locus\thash1\thash2\tseq1\tseq2\taligned_seq1\taligned_seq2\tsnps\tindel_events\tindel_bases\talignment_score".to_string());
+        self.alignment_writer = None;
+        self.alignment_rows = 0;
+        self.alignment_error = None;
     }
 
-    /// Save alignment details to TSV file
-    pub fn save_alignments(&self) -> Result<(), String> {
-        if let Some(path) = &self.save_alignments_path {
-            if !self.alignment_details.is_empty() {
-                let content = self.alignment_details.join("\n") + "\n";
-                std::fs::write(path, content)
-                    .map_err(|e| format!("Failed to write alignments file: {e}"))?;
-                println!(
-                    "💾 Saved {} alignment details to: {}",
-                    self.alignment_details.len() - 1,
-                    path
-                );
+    const ALIGNMENTS_HEADER: &'static str = "locus\thash1\thash2\tseq1\tseq2\taligned_seq1\taligned_seq2\tsnps\tindel_events\tindel_bases\talignment_score";
+
+    /// Create the --save-alignments file and write its header.
+    fn open_alignments(&mut self) {
+        use std::io::Write;
+        let Some(path) = &self.save_alignments_path else {
+            return;
+        };
+        match std::fs::File::create(path) {
+            Ok(f) => {
+                let mut w = std::io::BufWriter::with_capacity(1 << 20, f);
+                if let Err(e) = writeln!(w, "{}", Self::ALIGNMENTS_HEADER) {
+                    self.alignment_error = Some(format!("Failed to write alignments file: {e}"));
+                } else {
+                    self.alignment_writer = Some(w);
+                }
+            }
+            Err(e) => self.alignment_error = Some(format!("Failed to write alignments file: {e}")),
+        }
+    }
+
+    /// Append one --save-alignments row (a write error is kept and reported
+    /// by `save_alignments`; later rows are then skipped).
+    fn write_alignment_row(&mut self, row: &str) {
+        use std::io::Write;
+        if self.alignment_error.is_some() {
+            return;
+        }
+        if self.alignment_writer.is_none() {
+            self.open_alignments();
+        }
+        if let Some(w) = self.alignment_writer.as_mut() {
+            match writeln!(w, "{row}") {
+                Ok(()) => self.alignment_rows += 1,
+                Err(e) => {
+                    self.alignment_error = Some(format!("Failed to write alignments file: {e}"))
+                }
             }
         }
+    }
+
+    /// Finish the alignment details file (--save-alignments). The file holds
+    /// the header and one row per pair aligned in this run; it is written
+    /// even when no pair was aligned.
+    pub fn save_alignments(&mut self) -> Result<(), String> {
+        use std::io::Write;
+        let Some(path) = self.save_alignments_path.clone() else {
+            return Ok(());
+        };
+        if self.alignment_writer.is_none() && self.alignment_error.is_none() {
+            self.open_alignments();
+        }
+        if let Some(mut w) = self.alignment_writer.take() {
+            if let Err(e) = w.flush() {
+                self.alignment_error
+                    .get_or_insert(format!("Failed to write alignments file: {e}"));
+            }
+        }
+        if let Some(e) = self.alignment_error.take() {
+            return Err(e);
+        }
+        println!(
+            "💾 Saved {} alignment details to: {}",
+            self.alignment_rows, path
+        );
         Ok(())
     }
 }

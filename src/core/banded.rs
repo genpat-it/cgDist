@@ -50,6 +50,14 @@ pub struct BandedStats {
     pub score: i32,
 }
 
+/// Gapped alignment strings, as parasail_result_get_traceback builds them:
+/// original bytes, '-' for gaps, query first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlignedStrings {
+    pub query: Vec<u8>,
+    pub reference: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Scoring {
     pub match_score: i32,
@@ -778,22 +786,26 @@ fn align_in_band_dp(
     dlo: i64,
     dhi: i64,
     choice: KernelChoice,
+    strings: Option<&mut AlignedStrings>,
 ) -> Result<BandedStats, Uncertified> {
     #[cfg(target_arch = "x86_64")]
     {
         if choice != KernelChoice::Scalar32 && std::arch::is_x86_feature_detected!("avx2") {
             if choice == KernelChoice::Auto && fits_i16(q.len(), r.len(), s) {
                 // SAFETY: AVX2 checked at runtime.
-                return DP_BUFFERS16
-                    .with(|c| unsafe { dp_avx2_16(q, r, s, dlo, dhi, &mut c.borrow_mut()) });
+                return DP_BUFFERS16.with(|c| unsafe {
+                    dp_avx2_16(q, r, s, dlo, dhi, &mut c.borrow_mut(), strings)
+                });
             }
             // SAFETY: AVX2 checked at runtime.
             return DP_BUFFERS
-                .with(|c| unsafe { dp_avx2_32(q, r, s, dlo, dhi, &mut c.borrow_mut()) });
+                .with(|c| unsafe { dp_avx2_32(q, r, s, dlo, dhi, &mut c.borrow_mut(), strings) });
         }
     }
     let _ = choice;
-    DP_BUFFERS.with(|c| align_in_band_dp_impl::<Scalar32>(q, r, s, dlo, dhi, &mut c.borrow_mut()))
+    DP_BUFFERS.with(|c| {
+        align_in_band_dp_impl::<Scalar32>(q, r, s, dlo, dhi, &mut c.borrow_mut(), strings)
+    })
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -805,8 +817,9 @@ unsafe fn dp_avx2_32(
     dlo: i64,
     dhi: i64,
     b: &mut DpBuffers<i32>,
+    strings: Option<&mut AlignedStrings>,
 ) -> Result<BandedStats, Uncertified> {
-    align_in_band_dp_impl::<Avx2x32>(q, r, s, dlo, dhi, b)
+    align_in_band_dp_impl::<Avx2x32>(q, r, s, dlo, dhi, b, strings)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -818,8 +831,9 @@ unsafe fn dp_avx2_16(
     dlo: i64,
     dhi: i64,
     b: &mut DpBuffers<i16>,
+    strings: Option<&mut AlignedStrings>,
 ) -> Result<BandedStats, Uncertified> {
-    align_in_band_dp_impl::<Avx2x16>(q, r, s, dlo, dhi, b)
+    align_in_band_dp_impl::<Avx2x16>(q, r, s, dlo, dhi, b, strings)
 }
 
 /// Geometry of one band: slot mapping and the cells of an anti-diagonal.
@@ -954,6 +968,7 @@ fn align_in_band_dp_impl<K: Kernel>(
     dlo: i64,
     dhi: i64,
     b: &mut DpBuffers<K::T>,
+    mut strings: Option<&mut AlignedStrings>,
 ) -> Result<BandedStats, Uncertified> {
     let n = q.len();
     let m = r.len();
@@ -1062,6 +1077,19 @@ fn align_in_band_dp_impl<K: Kernel>(
     let mut where_ = DIAG;
     let (mut snps, mut events, mut bases) = (0usize, 0usize, 0usize);
     let mut in_gap = false;
+    // Gapped strings are built backwards exactly as parasail's traceback
+    // template does (query '-' on insertions, reference '-' on deletions),
+    // then reversed.
+    if let Some(st) = strings.as_deref_mut() {
+        st.query.clear();
+        st.reference.clear();
+    }
+    let mut emit = |a: u8, c: u8| {
+        if let Some(st) = strings.as_deref_mut() {
+            st.query.push(a);
+            st.reference.push(c);
+        }
+    };
     loop {
         if i < 0 && j < 0 {
             break;
@@ -1072,6 +1100,15 @@ fn align_in_band_dp_impl<K: Kernel>(
                 events += 1;
             }
             bases += rest;
+            if i < 0 {
+                for jj in (0..=j).rev() {
+                    emit(b'-', r[jj as usize]);
+                }
+            } else {
+                for ii in (0..=i).rev() {
+                    emit(q[ii as usize], b'-');
+                }
+            }
             break;
         }
         let Some(t) = flag_at(i, j) else {
@@ -1084,6 +1121,7 @@ fn align_in_band_dp_impl<K: Kernel>(
                     if q[i as usize] != r[j as usize] {
                         snps += 1;
                     }
+                    emit(q[i as usize], r[j as usize]);
                     i -= 1;
                     j -= 1;
                 } else if t & INS != 0 {
@@ -1100,6 +1138,7 @@ fn align_in_band_dp_impl<K: Kernel>(
                     in_gap = true;
                 }
                 bases += 1;
+                emit(b'-', r[j as usize]);
                 j -= 1;
                 where_ = if t & DIAG_E != 0 {
                     DIAG
@@ -1115,6 +1154,7 @@ fn align_in_band_dp_impl<K: Kernel>(
                     in_gap = true;
                 }
                 bases += 1;
+                emit(q[i as usize], b'-');
                 i -= 1;
                 where_ = if t & DIAG_F != 0 {
                     DIAG
@@ -1125,6 +1165,10 @@ fn align_in_band_dp_impl<K: Kernel>(
                 };
             }
         }
+    }
+    if let Some(st) = strings {
+        st.query.reverse();
+        st.reference.reverse();
     }
     Ok(BandedStats {
         snps,
@@ -1203,24 +1247,44 @@ fn needed_width(n: i64, m: i64, score: i64, s: &Scoring) -> i64 {
 /// the full matrix. Returns None when no tried band could be certified; the
 /// caller must then compute the full alignment.
 pub fn align_certified(q: &[u8], r: &[u8], s: &Scoring, max_fraction: f64) -> Option<BandedStats> {
+    certified(q, r, s, max_fraction, None)
+}
+
+/// Like `align_certified`, also returning the gapped alignment strings,
+/// byte-identical to parasail's `get_traceback_strings` (same path).
+pub fn align_certified_with_strings(
+    q: &[u8],
+    r: &[u8],
+    s: &Scoring,
+    max_fraction: f64,
+) -> Option<(BandedStats, AlignedStrings)> {
+    let mut st = AlignedStrings::default();
+    certified(q, r, s, max_fraction, Some(&mut st)).map(|b| (b, st))
+}
+
+fn certified(
+    q: &[u8],
+    r: &[u8],
+    s: &Scoring,
+    max_fraction: f64,
+    strings: Option<&mut AlignedStrings>,
+) -> Option<BandedStats> {
     if q.is_empty() || r.is_empty() || s.gap_open < 0 || s.gap_extend < 0 {
         return None;
     }
     let (n, m) = (q.len() as i64, r.len() as i64);
     let full = (n * m) as f64;
-    {
-        // The best single-gap alignment is a valid alignment, so its score
-        // bounds the optimal score from below; the band it certifies is
-        // therefore guaranteed to certify. On real allele pairs the bound is
-        // usually exact, so one attempt with the narrowest provable band.
-        let lb = simple_lower_bound(q, r, s);
-        let w = needed_width(n, m, lb, s);
-        let (dlo, dhi) = band_for(n, m, w);
-        if (dhi - dlo + 1) as f64 * n as f64 > full * max_fraction {
-            return None;
-        }
-        align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Auto).ok()
+    // The best single-gap alignment is a valid alignment, so its score bounds
+    // the optimal score from below; the band it certifies is therefore
+    // guaranteed to certify. On real allele pairs the bound is usually exact,
+    // so one attempt with the narrowest provable band.
+    let lb = simple_lower_bound(q, r, s);
+    let w = needed_width(n, m, lb, s);
+    let (dlo, dhi) = band_for(n, m, w);
+    if (dhi - dlo + 1) as f64 * n as f64 > full * max_fraction {
+        return None;
     }
+    align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Auto, strings).ok()
 }
 
 /// Hooks for exhaustive verification (examples/banded_exhaustive.rs); not a
@@ -1234,9 +1298,9 @@ pub mod verify {
     /// kernel, and the row-major reference. None = not certified.
     pub fn band_results(q: &[u8], r: &[u8], s: &Scoring, w: i64) -> [Option<BandedStats>; 4] {
         let (dlo, dhi) = band_for(q.len() as i64, r.len() as i64, w);
-        let auto = align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Auto).ok();
-        let avx32 = align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Avx2x32).ok();
-        let scalar = align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Scalar32).ok();
+        let auto = align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Auto, None).ok();
+        let avx32 = align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Avx2x32, None).ok();
+        let scalar = align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Scalar32, None).ok();
         let row = BUFFERS.with(|c| align_in_band(q, r, s, dlo, dhi, &mut c.borrow_mut()).ok());
         [auto, avx32, scalar, row]
     }
@@ -1369,7 +1433,7 @@ mod tests {
             let (n, m) = (q.len() as i64, r.len() as i64);
             for w in [0, 1, 2, 5, 17] {
                 let (dlo, dhi) = band_for(n, m, w);
-                let a = align_in_band_dp(&q, &r, &s, dlo, dhi, KernelChoice::Auto);
+                let a = align_in_band_dp(&q, &r, &s, dlo, dhi, KernelChoice::Auto, None);
                 let b = align_in_band(&q, &r, &s, dlo, dhi, &mut row);
                 match (a, b) {
                     (Ok(x), Ok(y)) => assert_eq!(x, y),
@@ -1414,6 +1478,33 @@ mod tests {
             }
         }
         assert!(certified > 2000, "too few certified cases: {certified}");
+    }
+
+    #[test]
+    fn aligned_strings_equal_parasail() {
+        let mut rng = Rng(424242);
+        let mut checked = 0;
+        for _ in 0..3000 {
+            let (q, r) = random_pair(&mut rng);
+            let s = PRESETS[rng.below(3) as usize];
+            if let Some((b, st)) = align_certified_with_strings(&q, &r, &s, 1.0) {
+                let m = Matrix::create(b"ACGT", s.match_score, s.mismatch).unwrap();
+                let a = Aligner::new()
+                    .matrix(m)
+                    .gap_open(s.gap_open)
+                    .gap_extend(s.gap_extend)
+                    .global()
+                    .use_trace()
+                    .build();
+                let res = a.align(Some(&q), &r).unwrap();
+                let tb = res.get_traceback_strings(&q, &r).unwrap();
+                assert_eq!(st.query, tb.query.as_bytes());
+                assert_eq!(st.reference, tb.reference.as_bytes());
+                assert_eq!(b.score, res.get_score());
+                checked += 1;
+            }
+        }
+        assert!(checked > 1500, "too few certified cases: {checked}");
     }
 
     #[test]
