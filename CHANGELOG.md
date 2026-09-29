@@ -15,33 +15,35 @@ Bug-fix release. Two cache bugs, both present since 0.1.0, are fixed.
 and with caches never used in Hamming mode, distance matrices are unchanged:
 all four modes (with and without `--min-loci`) were checked byte-identical
 against 0.1.3 on a real *L. monocytogenes* dataset (300 samples × 1,748 loci),
-and cached runs now always match uncached runs.
+and cached runs matched uncached runs in every mode tested.
 
 ### ⚠️ Advisory — caches shared with Hamming mode
 
 In cgdist ≤ 0.1.3, `--mode hamming` together with `--cache-file` stored a
-placeholder result (1 SNP, 0 InDels) in the cache for every allele pair,
-without aligning. A later `snps`, `snps-indel-events` or `snps-indel-bases`
-run on the **same cache file** read those placeholders as real alignments:
+placeholder result (1 SNP, 0 InDels), without aligning, for every allele pair
+of that run not already in the cache. A later `snps`, `snps-indel-events` or
+`snps-indel-bases` run on the **same cache file** read those placeholders as
+real alignments:
 
-- on a cache first written in Hamming mode, the SNP/InDel matrix silently
-  equalled the Hamming matrix;
+- on a cache first written in Hamming mode, the SNP/InDel distances silently
+  equalled the Hamming distances for the allele pairs of the Hamming run;
 - on a cache that already held alignments, pairs involving alleles absent from
-  the schema FASTA got distance 1 instead of 0.
+  the schema FASTA got distance 1 instead of 0 (with default settings).
 
 You are affected only if one cache file was used both with `--mode hamming`
 and with an SNP/InDel mode. Delete such caches, or rebuild them with
 `--force-recompute`; SNP/InDel matrices computed from them should be
 regenerated. cgdist now prints a warning when it loads a cache last written in
 Hamming mode by a version ≤ 0.1.3. Runs using the `hamming` hasher, separate
-caches per mode, or no cache were never affected. (The cgDist article's
-analyses used an external tool for Hamming distances and are not affected.)
+caches per mode, or no cache were never affected. (The Hamming distances in the
+cgDist article were computed with an external tool, cgmlst-dists, so the
+article's results are not affected.)
 
 ### Fixed
 
 - `--mode hamming` no longer reads or writes alignment statistics in the cache:
   Hamming distances are answered directly (different alleles = 1), and a
-  Hamming run leaves an existing cache file untouched.
+  Hamming run no longer adds entries to an existing cache file.
 - Sequence lengths are no longer lost from enriched caches. With
   `--enrich-lengths`, saving a cache that gained new pairs wrote every entry
   without lengths, so the documented recombination workflow (fresh cache +

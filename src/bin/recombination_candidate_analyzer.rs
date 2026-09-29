@@ -510,7 +510,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if with_lengths < enriched_cache.data.len() {
         println!(
-            "⚠️  {} of {} cache entries have no sequence lengths and cannot be assessed",
+            "⚠️  {} of {} cache entries lack the sequence length of one or both alleles and cannot be assessed",
             enriched_cache.data.len() - with_lengths,
             enriched_cache.data.len()
         );
