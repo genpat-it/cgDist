@@ -154,7 +154,7 @@ fn main() {
                     for w in 0..=wmax {
                         let res = verify::band_results(q, r, s, w);
                         local_checks += 1;
-                        if res[0] != res[1] || res[0] != res[2] {
+                        if res[0] != res[1] || res[0] != res[2] || res[0] != res[3] {
                             fail(&format!("implementations disagree at w={w}"));
                         }
                         match res[0] {

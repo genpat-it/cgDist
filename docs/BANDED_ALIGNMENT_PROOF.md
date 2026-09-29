@@ -168,6 +168,34 @@ of parity `k & 1`. It relies on these invariants:
 * Pairs with a NUL byte are left to parasail, as are pairs with
   `--save-alignments`, which needs the aligned strings.
 
+**16-bit kernel.** With AVX2, cgDist uses a kernel with 16 x i16 lanes and
+saturating arithmetic whenever `fits_i16(n, m, scoring)` holds. It is exact
+by a range argument:
+
+* Every in-band cell is reached by an in-band path (along the diagonal, then
+  one gap straight to the cell, whose offsets lie between 0 and the cell's
+  offset). So every real `H` is at least
+  `min(mismatch,0)*min(n,m) - open - extend*(n+m)`.
+* Every real `H` is at most `smax*min(n,m)`.
+* Real `E`, `F` and their intermediates (`E - extend`, `H - open`) lie at
+  most one `open` and one `extend` further down.
+* `fits_i16` requires all of these to be inside `(-30000, 30000)`. For the
+  `dna` preset that means genes up to several kb.
+
+Consequences:
+
+* Saturating operations on real cells never saturate, so they equal exact
+  integer arithmetic.
+* The "outside the band" value `-32000`, and everything derived from it by
+  subtracting penalties (clamped at `-32768`), stays below every real value.
+  It can therefore never win a maximum or tie with a real value.
+* Comparisons that involve only such values only affect flags of states
+  that are not on an optimal path, and the traceback never reads those.
+
+Hence the i16 kernel yields exactly the same values and flags on every cell
+the traceback reads. Otherwise the AVX2 i32 kernel, or the portable i32
+kernel, is used.
+
 ## 4. What is proved, and what is verified
 
 * **Proved (Section 2):** a certified banded result equals the full-matrix
@@ -183,11 +211,11 @@ The evidence:
 
 | Check | Scope | Differences |
 |---|---|---|
-| Exhaustive: **every** pair over {A,C,G,T,N} up to length 5, all 3 presets, **every** band width; SIMD, scalar and row-major implementations, parasail scan-16, all against parasail's original `nw_trace_striped_sat` | 15.2 M pairs, 272.6 M band checks | **0** |
+| Exhaustive: **every** pair over {A,C,G,T,N} up to length 5, all 3 presets, **every** band width; AVX2 i16, AVX2 i32, portable i32 and row-major implementations, parasail scan-16, all against parasail's original `nw_trace_striped_sat` | 15.2 M pairs, 272.6 M band checks | **0** |
 | Exhaustive: every pair over {A,C,G,T} up to length 6 | 29.8 M pairs, 620.1 M band checks | **0** |
 | Exhaustive: every pair over {A,C,G,T,a} up to length 4 (lower-case scoring vs byte-wise SNP counting) | 0.6 M pairs, 9.1 M band checks | **0** |
 | Real allele pairs, L. monocytogenes and S. enterica | 739,554 pairs | **0** |
-| Adversarial fuzzing (tandem repeats, homopolymers, N, lower case, large length differences, unrelated sequences), 3 presets | 200,000 cases, 109,030 certified | **0** |
+| Adversarial fuzzing (tandem repeats, homopolymers, N, lower case, large length differences, unrelated sequences), 3 presets, two seeds | 400,000 cases, 218,237 certified | **0** |
 | Full runs with `--verify-alignments 1` (every pair re-checked in production) | both datasets | **0** |
 | Distance matrices and cache contents vs cgdist 0.1.4 | both datasets, all modes | identical |
 

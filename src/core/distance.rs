@@ -841,16 +841,27 @@ impl DistanceEngine {
         );
 
         let start_compute = Instant::now();
-        let requested: Vec<&(String, u32, u32)> = missing_pairs.clone();
-
         // Simple progress tracking - update every N completions
         let completed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let update_frequency = 1000; // Update every 1000 completions
 
-        // Compute alignments with periodic progress updates
-        let results: Vec<_> = missing_pairs
+        // Compute alignments with periodic progress updates. Allele lengths
+        // (known because both sequences were just aligned) are gathered in the
+        // parallel part too, so the serial merge below is one insert per pair.
+        #[allow(clippy::type_complexity)]
+        let results: Vec<(
+            &(String, u32, u32),
+            Option<(
+                usize,
+                usize,
+                usize,
+                (Option<u32>, Option<u32>),
+                Option<String>,
+            )>,
+        )> = missing_pairs
             .into_par_iter()
-            .filter_map(|(locus, crc1, crc2)| {
+            .map(|pair| {
+                let (locus, crc1, crc2) = pair;
                 let alignment_result = self.compute_single_alignment(locus, *crc1, *crc2);
 
                 // Increment and check if we should update progress
@@ -860,56 +871,54 @@ impl DistanceEngine {
                     pb.set_position(completed as u64);
                 }
 
-                // Only include pairs with successful alignment results
-                alignment_result.map(|(snps, indel_events, indel_bases, detail)| {
-                    (locus, *crc1, *crc2, snps, indel_events, indel_bases, detail)
-                })
+                let with_lens =
+                    alignment_result.map(|(snps, indel_events, indel_bases, detail)| {
+                        let (lo, hi) = ((*crc1).min(*crc2), (*crc1).max(*crc2));
+                        let lens = self.sequence_db.as_ref().map_or((None, None), |db| {
+                            (
+                                db.get_sequence(locus, lo).map(|s| s.sequence.len() as u32),
+                                db.get_sequence(locus, hi).map(|s| s.sequence.len() as u32),
+                            )
+                        });
+                        (snps, indel_events, indel_bases, lens, detail)
+                    });
+                (pair, with_lens)
             })
             .collect();
 
         pb.finish_with_message("✅ Missing alignments computed!");
 
-        // Store results in cache (and collect alignment detail rows for --save-alignments)
-        for (locus, crc1, crc2, snps, indel_events, indel_bases, detail) in results {
-            self.cache_distance(locus, crc1, crc2, snps, indel_events, indel_bases);
-            // Both sequences were just aligned, so their lengths are known:
-            // record them now (per locus) instead of in a later enrichment pass.
-            let (lo, hi) = (crc1.min(crc2), crc1.max(crc2));
-            let lens = self.sequence_db.as_ref().map(|db| {
-                (
-                    db.get_sequence(locus, lo).map(|s| s.sequence.len() as u32),
-                    db.get_sequence(locus, hi).map(|s| s.sequence.len() as u32),
-                )
-            });
-            if let Some(lens) = lens {
-                let key = DistanceCacheKey {
-                    locus: locus.clone(),
-                    crc1: lo,
-                    crc2: hi,
-                };
-                if let Some(e) = self.cache.get_mut(&key) {
-                    e.lens = lens;
+        // Store results in cache (and collect alignment detail rows for
+        // --save-alignments). Pairs that could not be aligned are never
+        // cached, so they are reported on every run until the schema is fixed.
+        let mut unaligned: Vec<&(String, u32, u32)> = Vec::new();
+        for (pair, res) in results {
+            let (locus, crc1, crc2) = pair;
+            match res {
+                Some((snps, indel_events, indel_bases, lens, detail)) => {
+                    self.cache.insert(
+                        DistanceCacheKey {
+                            locus: locus.clone(),
+                            crc1: (*crc1).min(*crc2),
+                            crc2: (*crc1).max(*crc2),
+                        },
+                        CacheEntry {
+                            snps,
+                            indel_events,
+                            indel_bases,
+                            lens,
+                        },
+                    );
+                    self.has_new_entries = true;
+                    if let Some(row) = detail {
+                        self.alignment_details.push(row);
+                    }
                 }
-            }
-            if let Some(row) = detail {
-                self.alignment_details.push(row);
+                None => unaligned.push(pair),
             }
         }
 
         let compute_elapsed = start_compute.elapsed();
-
-        // Pairs that could not be aligned are never cached, so they are
-        // reported on every run until the schema is fixed.
-        let unaligned: Vec<&(String, u32, u32)> = requested
-            .into_iter()
-            .filter(|(locus, c1, c2)| {
-                !self.cache.contains_key(&DistanceCacheKey {
-                    locus: locus.clone(),
-                    crc1: (*c1).min(*c2),
-                    crc2: (*c1).max(*c2),
-                })
-            })
-            .collect();
         let aligned_count = missing_count - unaligned.len();
 
         println!("🚀 Cache-aware precompute completed:");

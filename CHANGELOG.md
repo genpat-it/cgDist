@@ -26,8 +26,9 @@ until the API stabilizes).
 - A cache no longer goes through a separate enrichment pass after saving
   when every entry already has its allele lengths: newly aligned pairs record
   both lengths at alignment time, which avoids re-reading the whole schema.
-  Cold runs with `--cache-file` (16 threads): 72 s -> 2.4 s
-  (L. monocytogenes, 300 samples), 153 s -> 4.2 s (S. enterica, 120 samples).
+  Cold runs with `--cache-file` (16 threads): 72 s -> 2.1 s
+  (L. monocytogenes, 300 samples), 153 s -> 3.9 s (S. enterica, 120 samples);
+  the alignment step itself is 120-140x faster per pair.
 
 ### Fixed
 
