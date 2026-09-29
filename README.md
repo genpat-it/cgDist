@@ -305,6 +305,15 @@ ALIGNMENT OPTIONS:
     --gap-extend <N>           Custom gap extend penalty (enables custom mode)
     --save-alignments <FILE>   Save detailed alignments to TSV file
     --save-cigar <FILE>        Save one compact CIGAR row per aligned pair (TSV)
+
+CODING / CUSTOM DISTANCE OPTIONS:
+    --mode nonsyn-snps         Count only nonsynonymous SNPs
+    --mode custom --weights S  Per-locus weighted sum, e.g. "nonsyn=1,indel_events=1"
+                               keys: allele, snps, indel_events, indel_bases,
+                               syn, nonsyn, frame_disrupted (integer weights)
+    --translation-table <N>    NCBI genetic code for syn/nonsyn [default: 11]
+    --no-first-codon-as-met    Do not read GTG/TTG/... at codon 1 as Met
+    --coding-stats             Store syn/nonsyn counts in the cache for later use
     --verify-alignments <F>    Re-check fraction F (0-1) of new alignments against
                                parasail's original kernel; stop on any difference
 
@@ -508,6 +517,43 @@ several SNPs in one codon are evaluated together (haplotype-aware, as in
 bcftools csq). Protein changes are numbered on allele 1 (`p.Glu243Asp`,
 `p.Arg8=`). The summary counts synonymous and nonsynonymous SNPs and says
 whether the two proteins are identical.
+
+## 🧪 Synonymous / Nonsynonymous and Custom Distances
+
+The SNPs of every aligned pair can be classified at codon level, with the
+same rules as `cgdist-diff`, into **synonymous** (`syn`), **nonsynonymous**
+(`nonsyn`: missense, stop gained or lost, start lost) and
+**frame-disrupted** (`frame_disrupted`: in codons shifted or split by an
+InDel). The three always add up to `snps`. Distance modes that use them:
+
+```bash
+# only nonsynonymous SNPs
+cgdist ... --mode nonsyn-snps --cache-file cache.lz4
+
+# any weighted combination, per locus
+cgdist ... --mode custom --weights "nonsyn=1,frame_disrupted=1,indel_events=1"
+```
+
+With `--mode custom`, the contribution of a locus whose alleles differ is
+the sum of `weight × count` over `allele` (1 per differing locus),
+`snps`, `indel_events`, `indel_bases`, `syn`, `nonsyn` and
+`frame_disrupted`. The built-in modes are particular cases:
+
+| mode | weights |
+|------|---------|
+| `hamming` | `allele=1` |
+| `snps` | `snps=1` |
+| `snps-indel-contiguous` | `snps=1,indel_events=1` |
+| `snps-indel-bases` | `snps=1,indel_bases=1` |
+| `nonsyn-snps` | `nonsyn=1` |
+
+The counts are stored in the cache as optional fields (`syn`, `nonsyn`,
+`frame_disrupted`), together with the genetic code they were computed with
+(`--translation-table`, `--no-first-codon-as-met`). Pairs cached without
+them, or with another genetic code, are realigned when needed. The
+realignment must reproduce the cached SNP/InDel counts, otherwise cgdist
+stops with an error. Older cgdist versions read such caches unchanged.
+`--coding-stats` stores the counts even when the mode does not use them.
 
 ## 🧬 Recombination-Candidate Flagging
 

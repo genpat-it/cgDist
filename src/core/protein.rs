@@ -309,6 +309,52 @@ pub fn classify_snp(
     }
 }
 
+/// Synonymous / nonsynonymous classification of all SNPs of one allele
+/// pair. syn + nonsyn + frame_disrupted equals the pair's SNP count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CodingCounts {
+    pub syn: u32,
+    pub nonsyn: u32,
+    pub frame_disrupted: u32,
+}
+
+/// Classify every SNP of an alignment (gapped strings, allele 1 first) with
+/// the same rules as `classify_snp`. A SNP is an aligned column whose two
+/// bytes differ, as in `compute_alignment_stats`.
+pub fn coding_counts(
+    code: &GeneticCode,
+    seq1: &[u8],
+    seq2: &[u8],
+    q_aln: &[u8],
+    r_aln: &[u8],
+) -> CodingCounts {
+    let map = map_allele1_to_allele2(q_aln, r_aln);
+    let mut c = CodingCounts::default();
+    let (mut p1, mut p2) = (0usize, 0usize);
+    for (&a, &b) in q_aln.iter().zip(r_aln) {
+        match (a == b'-', b == b'-') {
+            (false, false) => {
+                if a != b {
+                    let e = classify_snp(code, seq1, seq2, &map, p1, p2).effect;
+                    if e.is_synonymous() {
+                        c.syn += 1;
+                    } else if e.is_nonsynonymous() {
+                        c.nonsyn += 1;
+                    } else {
+                        c.frame_disrupted += 1;
+                    }
+                }
+                p1 += 1;
+                p2 += 1;
+            }
+            (false, true) => p1 += 1,
+            (true, false) => p2 += 1,
+            (true, true) => {}
+        }
+    }
+    c
+}
+
 /// Sequence Ontology term of an InDel run of `len` bases; `insertion` is
 /// relative to allele 1 (bases present only in allele 2).
 pub fn indel_effect(len: usize, insertion: bool) -> &'static str {
@@ -395,6 +441,17 @@ mod tests {
             !SnpEffect::FrameDisrupted.is_synonymous()
                 && !SnpEffect::FrameDisrupted.is_nonsynonymous()
         );
+    }
+
+    #[test]
+    fn coding_counts_partition_snps() {
+        let code = GeneticCode::default();
+        // synonymous (codon 2), missense (codon 3), frame-disrupted after an insertion
+        let q = b"ATGGGAAGA-CCATAA";
+        let r = b"ATGGGGAGCTCGATAA";
+        let s1: Vec<u8> = q.iter().copied().filter(|&c| c != b'-').collect();
+        let c = coding_counts(&code, &s1, r, q, r);
+        assert_eq!((c.syn, c.nonsyn, c.frame_disrupted), (1, 1, 1));
     }
 
     #[test]

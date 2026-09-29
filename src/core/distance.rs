@@ -1,9 +1,10 @@
 // distance.rs - Core distance calculation engine
 
 use crate::core::alignment::{
-    cigar_from_aligned, compute_alignment_stats, AlignmentConfig, DistanceMode,
+    cigar_from_aligned, compute_alignment_stats, AlignmentConfig, DistanceMode, DistanceWeights,
 };
 use crate::core::banded::{align_certified, align_certified_with_strings, Scoring};
+use crate::core::protein::{coding_counts, CodingCounts, GeneticCode};
 use crate::data::{AllelicProfile, SequenceDatabase};
 use crate::hashers::{AlleleHasher, HasherRegistry};
 use chrono;
@@ -25,6 +26,9 @@ struct CacheEntry {
     /// Nucleotide lengths of the two alleles (key order: smaller CRC first),
     /// when known. Enables per-locus mutation-density / recombination signals.
     lens: (Option<u32>, Option<u32>),
+    /// Synonymous / nonsynonymous SNP counts, when computed (see
+    /// DistanceEngine::set_coding); tied to the cache's genetic code.
+    coding: Option<CodingCounts>,
 }
 
 impl CacheEntry {
@@ -120,6 +124,8 @@ struct PairDetail {
     full: Option<String>,
     /// --save-cigar row
     cigar: Option<String>,
+    /// synonymous/nonsynonymous counts (when coding counts are requested)
+    coding: Option<CodingCounts>,
 }
 
 /// Distance calculation engine
@@ -134,6 +140,12 @@ pub struct DistanceEngine {
     save_alignments_path: Option<String>,
     // Fraction of new alignments re-checked against parasail's original kernel
     verify_fraction: f64,
+    // Genetic code for synonymous/nonsynonymous counts (None = not computed)
+    coding: Option<GeneticCode>,
+    // Genetic code of the coding counts loaded from the cache file
+    loaded_code: Option<GeneticCodeMeta>,
+    // Weights for DistanceMode::Weighted
+    weights: DistanceWeights,
     // --save-alignments / --save-cigar outputs, written as rows are produced
     alignments_out: Option<RowWriter>,
     cigar_out: Option<RowWriter>,
@@ -164,6 +176,29 @@ pub struct CacheValue {
     pub seq1_length: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq2_length: Option<usize>,
+    // Coding counts (optional; genetic code in CacheMetadata::genetic_code)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub syn: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonsyn: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_disrupted: Option<u32>,
+}
+
+/// Genetic code the coding counts of a cache were computed with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeneticCodeMeta {
+    pub table: u32,
+    pub first_codon_as_met: bool,
+}
+
+impl From<&GeneticCode> for GeneticCodeMeta {
+    fn from(c: &GeneticCode) -> Self {
+        Self {
+            table: c.table_id(),
+            first_codon_as_met: c.first_codon_as_met,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +213,8 @@ pub struct CacheMetadata {
     pub total_entries: usize,
     pub unique_loci: usize,
     pub format_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub genetic_code: Option<GeneticCodeMeta>,
 }
 
 // Legacy support for old inspector format
@@ -436,6 +473,9 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
+            coding: None,
+            loaded_code: None,
+            weights: DistanceWeights::default(),
             alignments_out: None,
             cigar_out: None,
         }
@@ -455,6 +495,9 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
+            coding: None,
+            loaded_code: None,
+            weights: DistanceWeights::default(),
             alignments_out: None,
             cigar_out: None,
         }
@@ -490,6 +533,9 @@ impl DistanceEngine {
         if self.hasher_type == "hamming" || mode == DistanceMode::Hamming {
             return 1;
         }
+        if mode == DistanceMode::Weighted && !self.weights.needs_alignment() {
+            return self.weights.allele as usize;
+        }
 
         // Optimized key lookup - temporarily create key for lookup only
         let (min_crc, max_crc) = if crc1 <= crc2 {
@@ -499,11 +545,23 @@ impl DistanceEngine {
         };
 
         if let Some(&entry) = self.cache.get(&(locus, min_crc, max_crc) as &dyn KeyView) {
+            let coding = entry.coding.unwrap_or_default();
             let distance = match mode {
                 DistanceMode::SnpsOnly => entry.snps,
                 DistanceMode::SnpsAndIndelEvents => entry.snps + entry.indel_events,
                 DistanceMode::SnpsAndIndelBases => entry.snps + entry.indel_bases,
                 DistanceMode::Hamming => 1, // For hamming mode, different CRCs = 1
+                DistanceMode::NonsynSnps => coding.nonsyn as usize,
+                DistanceMode::Weighted => {
+                    let w = &self.weights;
+                    (w.allele as usize)
+                        + (w.snps as usize) * entry.snps
+                        + (w.indel_events as usize) * entry.indel_events
+                        + (w.indel_bases as usize) * entry.indel_bases
+                        + (w.syn as usize) * coding.syn as usize
+                        + (w.nonsyn as usize) * coding.nonsyn as usize
+                        + (w.frame_disrupted as usize) * coding.frame_disrupted as usize
+                }
             };
 
             // Apply Hamming fallback ONLY for SNPs mode: if alignment found 0 differences
@@ -521,6 +579,12 @@ impl DistanceEngine {
 
         // Cache miss - this should not happen if pre-computation worked
         // (Silent - individual misses not logged to reduce verbosity)
+
+        // Cache miss (pair could not be aligned): in custom mode only the
+        // allele term applies
+        if mode == DistanceMode::Weighted {
+            return self.weights.allele as usize;
+        }
 
         // Cache miss - apply Hamming fallback ONLY for SNPs mode and when enabled
         if no_hamming_fallback {
@@ -595,6 +659,7 @@ impl DistanceEngine {
             indel_events,
             indel_bases,
             lens: (None, None), // set by precompute_alignments when sequences are known
+            coding: None,
         };
         self.cache.insert(key, entry);
         self.has_new_entries = true; // Mark that cache has new entries
@@ -654,6 +719,9 @@ impl DistanceEngine {
                 // Keep the allele lengths already known (computed or enriched)
                 seq1_length: entry.lens.0.map(|l| l as usize),
                 seq2_length: entry.lens.1.map(|l| l as usize),
+                syn: entry.coding.map(|c| c.syn),
+                nonsyn: entry.coding.map(|c| c.nonsyn),
+                frame_disrupted: entry.coding.map(|c| c.frame_disrupted),
             };
 
             data.insert(string_key, cache_value);
@@ -683,11 +751,22 @@ impl DistanceEngine {
                 DistanceMode::SnpsAndIndelEvents => "snps-indel-events".to_string(),
                 DistanceMode::SnpsAndIndelBases => "snps-indel-bases".to_string(),
                 DistanceMode::Hamming => "hamming".to_string(),
+                DistanceMode::NonsynSnps => "nonsyn-snps".to_string(),
+                DistanceMode::Weighted => "custom".to_string(),
             },
             user_note,
             total_entries: self.cache.len(),
             unique_loci: unique_loci.len(),
             format_version: 2, // Version 2 = modern format
+            // coding counts present: the code they were computed with
+            genetic_code: if self.cache.values().any(|e| e.coding.is_some()) {
+                self.coding
+                    .as_ref()
+                    .map(GeneticCodeMeta::from)
+                    .or(self.loaded_code)
+            } else {
+                None
+            },
         };
 
         let modern_cache = ModernCache { data, metadata };
@@ -856,6 +935,22 @@ impl DistanceEngine {
                 println!("   This is safe because cache contains all alignment statistics.");
             }
 
+            // Coding counts are only valid for the genetic code they were
+            // computed with; with another code they are dropped (and
+            // recomputed where needed).
+            self.loaded_code = modern_cache.metadata.genetic_code;
+            let keep_coding = match (&self.coding, self.loaded_code) {
+                (Some(code), Some(meta)) => GeneticCodeMeta::from(code) == meta,
+                _ => true,
+            };
+            if !keep_coding {
+                println!(
+                    "ℹ️  Cache coding counts use another genetic code ({:?}); they will be recomputed where needed",
+                    self.loaded_code
+                );
+                self.loaded_code = None;
+            }
+
             // Convert modern format to internal format
             self.cache.clear();
             for (string_key, cache_value) in modern_cache.data {
@@ -875,6 +970,21 @@ impl DistanceEngine {
                             cache_value.seq1_length.map(|l| l as u32),
                             cache_value.seq2_length.map(|l| l as u32),
                         ),
+                        coding: match (
+                            keep_coding,
+                            cache_value.syn,
+                            cache_value.nonsyn,
+                            cache_value.frame_disrupted,
+                        ) {
+                            (true, Some(syn), Some(nonsyn), Some(frame_disrupted)) => {
+                                Some(CodingCounts {
+                                    syn,
+                                    nonsyn,
+                                    frame_disrupted,
+                                })
+                            }
+                            _ => None,
+                        },
                     };
                     self.cache.insert(key, entry);
                 }
@@ -925,6 +1035,7 @@ impl DistanceEngine {
                     indel_events,
                     indel_bases,
                     lens: (None, None), // legacy cache carries no sequence lengths
+                    coding: None,
                 };
                 self.cache.insert(key, entry);
             }
@@ -958,7 +1069,9 @@ impl DistanceEngine {
         // Hamming mode is answered without alignments (see get_distance). It
         // must never write placeholder statistics into the cache: a later
         // SNP/InDel run would read them back as real alignment results.
-        if matches!(mode, DistanceMode::Hamming) {
+        if matches!(mode, DistanceMode::Hamming)
+            || (mode == DistanceMode::Weighted && !self.weights.needs_alignment())
+        {
             println!("🎯 Hamming mode: no alignments needed ({total_pairs} allele pairs)");
             return;
         }
@@ -974,9 +1087,14 @@ impl DistanceEngine {
                 } else {
                     (*crc2, *crc1)
                 };
-                !self
+                match self
                     .cache
-                    .contains_key(&(locus.as_str(), min_crc, max_crc) as &dyn KeyView)
+                    .get(&(locus.as_str(), min_crc, max_crc) as &dyn KeyView)
+                {
+                    None => true,
+                    // coding counts requested but not in the cache yet
+                    Some(e) => self.coding.is_some() && e.coding.is_none(),
+                }
             })
             .collect();
 
@@ -1078,17 +1196,38 @@ impl DistanceEngine {
                 let (locus, crc1, crc2) = pair;
                 match res {
                     Some((snps, indel_events, indel_bases, lens, detail)) => {
+                        let coding = detail.as_ref().and_then(|d| d.coding);
+                        let key = DistanceCacheKey {
+                            locus: locus.clone(),
+                            crc1: (*crc1).min(*crc2),
+                            crc2: (*crc1).max(*crc2),
+                        };
+                        // A pair realigned only to add coding counts must
+                        // reproduce the statistics already in the cache.
+                        if let Some(old) = self.cache.get(&key) {
+                            if (old.snps, old.indel_events, old.indel_bases)
+                                != (snps, indel_events, indel_bases)
+                            {
+                                panic!(
+                                    "cache entry {}:{}:{} holds (snps, indel_events, indel_bases) = {:?} \
+                                     but realigning gives {:?}: the cache file is inconsistent with the \
+                                     schema or alignment parameters; rebuild it (--force-recompute)",
+                                    key.locus,
+                                    key.crc1,
+                                    key.crc2,
+                                    (old.snps, old.indel_events, old.indel_bases),
+                                    (snps, indel_events, indel_bases)
+                                );
+                            }
+                        }
                         self.cache.insert(
-                            DistanceCacheKey {
-                                locus: locus.clone(),
-                                crc1: (*crc1).min(*crc2),
-                                crc2: (*crc1).max(*crc2),
-                            },
+                            key,
                             CacheEntry {
                                 snps,
                                 indel_events,
                                 indel_bases,
                                 lens,
+                                coding,
                             },
                         );
                         self.has_new_entries = true;
@@ -1241,7 +1380,7 @@ impl DistanceEngine {
                         gap_open: self.config.gap_open,
                         gap_extend: self.config.gap_extend,
                     };
-                    if !self.wants_details() {
+                    if !self.needs_strings() {
                         if let Some(b) =
                             align_certified(&seq1.sequence, &seq2.sequence, &scoring, 0.5)
                         {
@@ -1294,7 +1433,7 @@ impl DistanceEngine {
                                 // --save-alignments is active. Reading self here is
                                 // fine in the parallel context; the row is returned and
                                 // collected by the caller (which holds &mut self).
-                                let detail = self.wants_details().then(|| {
+                                let detail = self.needs_strings().then(|| {
                                     self.pair_detail(
                                         locus,
                                         crc1,
@@ -1642,6 +1781,19 @@ impl DistanceEngine {
     }
 
     /// Set path for saving detailed alignments
+    /// Compute synonymous/nonsynonymous SNP counts with this genetic code for
+    /// every aligned pair (needed by --mode nonsyn-snps and by custom
+    /// weights on syn/nonsyn/frame_disrupted; --coding-stats stores them
+    /// anyway).
+    pub fn set_coding(&mut self, code: GeneticCode) {
+        self.coding = Some(code);
+    }
+
+    /// Weights used by DistanceMode::Weighted.
+    pub fn set_weights(&mut self, weights: DistanceWeights) {
+        self.weights = weights;
+    }
+
     /// Re-check a deterministic fraction of new alignments against parasail's
     /// original production kernel (striped, saturating); any difference
     /// aborts the run.
@@ -1664,6 +1816,12 @@ impl DistanceEngine {
         self.alignments_out.is_some() || self.cigar_out.is_some()
     }
 
+    /// Whether alignments must produce gapped strings (output rows or
+    /// coding counts).
+    fn needs_strings(&self) -> bool {
+        self.wants_details() || self.coding.is_some()
+    }
+
     /// Build the requested output rows for one aligned pair.
     #[allow(clippy::too_many_arguments)]
     fn pair_detail(
@@ -1680,6 +1838,9 @@ impl DistanceEngine {
     ) -> PairDetail {
         let (snps, indel_events, indel_bases) = stats;
         PairDetail {
+            coding: self.coding.as_ref().map(|code| {
+                coding_counts(code, seq1, seq2, query.as_bytes(), reference.as_bytes())
+            }),
             full: self.alignments_out.as_ref().map(|_| {
                 format!(
                     "{locus}\t{crc1}\t{crc2}\t{}\t{}\t{}\t{}\t{snps}\t{indel_events}\t{indel_bases}\t{:.2}",
@@ -2221,6 +2382,73 @@ mod tests {
         );
         let want = reference_alignment_stats(&AlignmentConfig::default(), A, B);
         assert_eq!(want, Some((2, 0, 0)));
+    }
+
+    #[test]
+    fn coding_counts_modes_and_cache_roundtrip() {
+        use crate::core::protein::GeneticCode;
+        // ATG GGA AGA TAA vs ATG GGG AGC TAA: codon 2 synonymous, codon 3 missense (Arg->Ser)
+        let a: &[u8] = b"ATGGGAAGATAA";
+        let b: &[u8] = b"ATGGGGAGCTAA";
+        let (mut e, c) = engine_with(&[a, b]);
+        e.set_coding(GeneticCode::default());
+        e.precompute_alignments(&pairs(&c), DistanceMode::NonsynSnps);
+        assert_eq!(
+            e.get_distance("L1", c[0], c[1], DistanceMode::SnpsOnly, true),
+            2
+        );
+        assert_eq!(
+            e.get_distance("L1", c[0], c[1], DistanceMode::NonsynSnps, true),
+            1
+        );
+        e.set_weights(DistanceWeights::parse("allele=10,syn=3,nonsyn=5").unwrap());
+        assert_eq!(
+            e.get_distance("L1", c[0], c[1], DistanceMode::Weighted, true),
+            10 + 3 + 5
+        );
+
+        // round trip keeps the counts and the genetic code
+        let path = std::env::temp_dir().join(format!("cgdist_coding_{}.lz4", std::process::id()));
+        let path = path.to_str().unwrap();
+        e.save_cache(path, DistanceMode::NonsynSnps).unwrap();
+        let (mut e2, _) = engine_with(&[a, b]);
+        e2.set_coding(GeneticCode::default());
+        e2.load_cache(path, DistanceMode::NonsynSnps).unwrap();
+        assert_eq!(
+            e2.get_distance("L1", c[0], c[1], DistanceMode::NonsynSnps, true),
+            1
+        );
+        // another genetic code: counts are dropped, to be recomputed
+        let (mut e3, _) = engine_with(&[a, b]);
+        e3.set_coding(GeneticCode::new(4, true).unwrap());
+        e3.load_cache(path, DistanceMode::NonsynSnps).unwrap();
+        assert_eq!(
+            e3.get_distance("L1", c[0], c[1], DistanceMode::NonsynSnps, true),
+            0
+        );
+        e3.precompute_alignments(&pairs(&c), DistanceMode::NonsynSnps);
+        assert_eq!(
+            e3.get_distance("L1", c[0], c[1], DistanceMode::NonsynSnps, true),
+            1
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn weights_parsing() {
+        let w = DistanceWeights::parse("nonsyn=1, frame_disrupted=2,indel_events=1").unwrap();
+        assert_eq!(
+            (w.nonsyn, w.frame_disrupted, w.indel_events, w.snps),
+            (1, 2, 1, 0)
+        );
+        assert!(w.needs_coding() && w.needs_alignment());
+        let h = DistanceWeights::parse("allele=1").unwrap();
+        assert!(!h.needs_alignment());
+        assert!(DistanceWeights::parse("").is_err());
+        assert!(DistanceWeights::parse("snps=1.5").is_err());
+        assert!(DistanceWeights::parse("snps=-1").is_err());
+        assert!(DistanceWeights::parse("foo=1").is_err());
+        assert!(DistanceWeights::parse("snps").is_err());
     }
 
     #[test]

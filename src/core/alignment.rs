@@ -91,6 +91,108 @@ pub enum DistanceMode {
     SnpsAndIndelEvents,
     SnpsAndIndelBases,
     Hamming,
+    /// nonsynonymous SNPs only (needs coding counts, see core::protein)
+    NonsynSnps,
+    /// user-defined weighted sum of per-pair counts (see DistanceWeights)
+    Weighted,
+}
+
+/// Per-locus contribution of a pair of different alleles in `--mode custom`:
+/// the sum of `weight * count` over the counts below. Integer weights keep
+/// distances integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DistanceWeights {
+    /// 1 per locus whose alleles differ (Hamming unit)
+    pub allele: u32,
+    pub snps: u32,
+    pub indel_events: u32,
+    pub indel_bases: u32,
+    /// synonymous SNPs (synonymous, stop_retained, start_retained)
+    pub syn: u32,
+    /// nonsynonymous SNPs (missense, stop_gained, stop_lost, start_lost)
+    pub nonsyn: u32,
+    /// SNPs in codons shifted or split by an InDel
+    pub frame_disrupted: u32,
+}
+
+impl DistanceWeights {
+    pub const KEYS: [&'static str; 7] = [
+        "allele",
+        "snps",
+        "indel_events",
+        "indel_bases",
+        "syn",
+        "nonsyn",
+        "frame_disrupted",
+    ];
+
+    /// Parse "key=weight,key=weight" (keys in `KEYS`, non-negative integers).
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let mut w = DistanceWeights::default();
+        let mut any = false;
+        for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            let (k, v) = part
+                .split_once('=')
+                .ok_or_else(|| format!("--weights: expected key=value, got '{part}'"))?;
+            let v: u32 = v.trim().parse().map_err(|_| {
+                format!(
+                    "--weights: weight of '{}' must be a non-negative integer, got '{}'",
+                    k.trim(),
+                    v.trim()
+                )
+            })?;
+            let slot = match k.trim() {
+                "allele" => &mut w.allele,
+                "snps" => &mut w.snps,
+                "indel_events" => &mut w.indel_events,
+                "indel_bases" => &mut w.indel_bases,
+                "syn" => &mut w.syn,
+                "nonsyn" => &mut w.nonsyn,
+                "frame_disrupted" => &mut w.frame_disrupted,
+                other => {
+                    return Err(format!(
+                        "--weights: unknown key '{other}' (use: {})",
+                        Self::KEYS.join(", ")
+                    ))
+                }
+            };
+            *slot = v;
+            any = true;
+        }
+        if !any {
+            return Err("--weights: no weights given".to_string());
+        }
+        Ok(w)
+    }
+
+    /// Whether any weight needs the synonymous/nonsynonymous classification.
+    pub fn needs_coding(&self) -> bool {
+        self.syn > 0 || self.nonsyn > 0 || self.frame_disrupted > 0
+    }
+
+    /// Whether any weight needs an alignment (everything but `allele`).
+    pub fn needs_alignment(&self) -> bool {
+        self.snps > 0 || self.indel_events > 0 || self.indel_bases > 0 || self.needs_coding()
+    }
+
+    pub fn describe(&self) -> String {
+        let vals = [
+            self.allele,
+            self.snps,
+            self.indel_events,
+            self.indel_bases,
+            self.syn,
+            self.nonsyn,
+            self.frame_disrupted,
+        ];
+        Self::KEYS
+            .iter()
+            .zip(vals)
+            .filter(|(_, v)| *v > 0)
+            .map(|(k, v)| format!("{v}*{k}"))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    }
 }
 
 impl FromStr for DistanceMode {
@@ -106,7 +208,9 @@ impl FromStr for DistanceMode {
             }
             "snps-indel-bases" | "snps+indel-bases" => Ok(DistanceMode::SnpsAndIndelBases),
             "hamming" => Ok(DistanceMode::Hamming),
-            _ => Err(format!("Invalid distance mode: {s}. Use: snps, snps-indel-contiguous, snps-indel-bases, hamming"))
+            "nonsyn-snps" | "nonsynonymous-snps" => Ok(DistanceMode::NonsynSnps),
+            "custom" => Ok(DistanceMode::Weighted),
+            _ => Err(format!("Invalid distance mode: {s}. Use: snps, snps-indel-contiguous, snps-indel-bases, hamming, nonsyn-snps, custom"))
         }
     }
 }
@@ -118,6 +222,8 @@ impl DistanceMode {
             DistanceMode::SnpsAndIndelEvents => "SNPs + indel events",
             DistanceMode::SnpsAndIndelBases => "SNPs + indel bases",
             DistanceMode::Hamming => "Hamming distance (all mismatches)",
+            DistanceMode::NonsynSnps => "nonsynonymous SNPs",
+            DistanceMode::Weighted => "custom weighted counts",
         }
     }
 }

@@ -71,6 +71,18 @@ until the API stabilizes).
   an independent Biopython-based classification (28,766 SNPs, table 11;
   5,706 differences each for tables 11, 4, 1 and 2, with and without the
   first-codon rule): no differences.
+- Synonymous / nonsynonymous distances: `--mode nonsyn-snps` and
+  `--mode custom --weights "key=w,..."`, a per-locus weighted sum over
+  allele, snps, indel_events, indel_bases, syn, nonsyn and frame_disrupted
+  (the built-in modes are particular weightings), with `--translation-table`,
+  `--no-first-codon-as-met` and `--coding-stats`. The counts are optional
+  cache fields tied to a `genetic_code` metadata entry, and remain readable
+  by older cgdist. Checked on both test datasets:
+  - existing modes identical to 0.1.4;
+  - `custom` weightings identical to the built-in modes;
+  - syn + nonsyn + frame_disrupted = snps on all 739,554 cache entries;
+  - counts equal to cgdist-diff (Biopython-validated) on 600 pairs;
+  - completing a 0.1.4 cache reproduces every cached SNP/InDel count.
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).

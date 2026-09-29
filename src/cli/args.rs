@@ -141,6 +141,28 @@ pub struct Args {
     #[argh(option)]
     pub save_alignments: Option<String>,
 
+    /// weights for --mode custom: per-locus contribution = sum of
+    /// weight*count, e.g. "nonsyn=1,frame_disrupted=1,indel_events=1"; keys:
+    /// allele (1 per differing locus), snps, indel_events, indel_bases, syn,
+    /// nonsyn, frame_disrupted; non-negative integers
+    #[argh(option)]
+    pub weights: Option<String>,
+
+    /// NCBI translation table for synonymous/nonsynonymous classification
+    /// (default: 11, Bacterial, Archaeal and Plant Plastid)
+    #[argh(option, default = "11")]
+    pub translation_table: u32,
+
+    /// do not read an alternative start codon (e.g. GTG, TTG) as Met when it
+    /// is the first codon
+    #[argh(switch)]
+    pub no_first_codon_as_met: bool,
+
+    /// compute and store synonymous/nonsynonymous SNP counts in the cache
+    /// even when the distance mode does not use them
+    #[argh(switch)]
+    pub coding_stats: bool,
+
     /// save one compact CIGAR row per aligned pair (TSV: locus, hash1, hash2,
     /// cigar, snps, indel_events, indel_bases, alignment_score); '=' match,
     /// 'X' SNP, 'I' query base vs reference gap, 'D' reference base vs query gap

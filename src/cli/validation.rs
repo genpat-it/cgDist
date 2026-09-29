@@ -1,6 +1,8 @@
 // validation.rs - Input validation utilities
 
 use crate::cli::args::Args;
+use crate::core::alignment::DistanceWeights;
+use crate::core::protein::GeneticCode;
 use crate::core::{AlignmentConfig, DistanceMode};
 use crate::hashers::HasherRegistry;
 use regex::Regex;
@@ -11,6 +13,10 @@ use std::str::FromStr;
 
 pub struct ValidationResult {
     pub distance_mode: DistanceMode,
+    /// weights for --mode custom (all zero otherwise)
+    pub weights: DistanceWeights,
+    /// genetic code for synonymous/nonsynonymous counts, when needed
+    pub coding: Option<GeneticCode>,
     pub alignment_config: AlignmentConfig,
     pub sample_include_regex: Option<Regex>,
     pub sample_exclude_regex: Option<Regex>,
@@ -59,6 +65,31 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
 
     // Validate distance mode
     let distance_mode = DistanceMode::from_str(&args.mode)?;
+
+    // --mode custom / --weights / coding counts
+    let weights = match (distance_mode, &args.weights) {
+        (DistanceMode::Weighted, Some(spec)) => DistanceWeights::parse(spec)?,
+        (DistanceMode::Weighted, None) => {
+            return Err(format!(
+                "--mode custom requires --weights, e.g. --weights \"nonsyn=1,indel_events=1\" (keys: {})",
+                DistanceWeights::KEYS.join(", ")
+            ))
+        }
+        (_, Some(_)) => return Err("--weights is only used with --mode custom".to_string()),
+        (_, None) => DistanceWeights::default(),
+    };
+    let needs_coding = distance_mode == DistanceMode::NonsynSnps || weights.needs_coding();
+    let coding = if needs_coding || args.coding_stats {
+        Some(GeneticCode::new(
+            args.translation_table,
+            !args.no_first_codon_as_met,
+        )?)
+    } else {
+        None
+    };
+    if coding.is_some() && args.hasher_type == "hamming" {
+        return Err("synonymous/nonsynonymous counts need sequence alignments; they are not available with --hasher-type hamming".to_string());
+    }
 
     if !(0.0..=1.0).contains(&args.verify_alignments) {
         return Err(format!(
@@ -185,6 +216,8 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
 
     Ok(ValidationResult {
         distance_mode,
+        weights,
+        coding,
         alignment_config,
         sample_include_regex,
         sample_exclude_regex,

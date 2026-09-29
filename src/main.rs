@@ -321,6 +321,23 @@ fn run_main() -> Result<(), String> {
     }
 
     // Set alignment saving if requested
+    engine.set_weights(validation_result.weights);
+    if validation_result.distance_mode == DistanceMode::Weighted {
+        println!(
+            "⚖️  Custom distance per locus: {}",
+            validation_result.weights.describe()
+        );
+    }
+    if let Some(code) = validation_result.coding {
+        println!(
+            "🧬 Coding counts (synonymous/nonsynonymous) with NCBI table {} ({}), first codon as Met: {}",
+            code.table_id(),
+            code.table_name(),
+            if code.first_codon_as_met { "yes" } else { "no" }
+        );
+        engine.set_coding(code);
+    }
+
     if args.verify_alignments > 0.0 {
         engine.set_verify_fraction(args.verify_alignments);
         println!(
