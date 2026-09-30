@@ -60,9 +60,10 @@ pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
     }
 
     // Validate cache-only mode
-    if args.cache_only && args.cache_file.is_none() {
+    if args.cache_only && args.cache_file.is_none() && args.cache_dir.is_none() {
         return Err(
-            "--cache-only requires --cache-file to specify where to save the cache".to_string(),
+            "--cache-only requires --cache-file or --cache-dir to specify where to save the cache"
+                .to_string(),
         );
     }
 

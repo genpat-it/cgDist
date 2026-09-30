@@ -8,6 +8,14 @@ until the API stabilizes).
 
 ## [Unreleased]
 
+### Changed (portal work)
+- Linux builds use the mimalloc allocator: glibc's malloc serialised the
+  per-pair allocations of the traceback paths (`--coding-stats`,
+  `nonsyn-snps`, `--save-alignments`, `--save-cigar`) under many threads,
+  5-10x slower at 16-32 threads. Output is byte-identical.
+- `--cache-only` also accepts `--cache-dir` (it required `--cache-file`).
+- `--mode` and `--weights` help list every mode and key.
+
 ### Added (protein stores)
 - Protein cache stores: `cgdist-cache build --protein` precomputes every
   pair of distinct proteins of a schema (genetic code, matrix and gap
