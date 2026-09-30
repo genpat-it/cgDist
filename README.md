@@ -643,6 +643,22 @@ cgdist-cache import --cache cache.lz4 --out lm_store   # convert a cgdist cache
 * A store is used only if its hasher and alignment parameters match the
   run; coding counts are used only if the genetic code matches.
 
+The format is specified in [docs/STORE_FORMAT.md](docs/STORE_FORMAT.md);
+`scripts/cgds_reader.py` is an independent reference reader (Python standard
+library only) and `scripts/test_store_format.py` checks it against cgdist.
+
+### New alleles
+
+Pairs involving alleles that are not in a store (e.g. alleles inferred by
+chewBBACA in your samples) are aligned from `--schema` and kept in
+`--cache-dir`. Give cgdist the schema folder used for allele calling;
+`--fail-on-unaligned` stops the run if a pair cannot be aligned instead of
+counting it as 0. Locus files record a digest of every allele sequence, so an
+allele with the same CRC32 as a different store allele is never taken from
+the store. `cgdist-cache pull` merges downloaded loci with local pairs, and
+`cgdist-cache build --schema <your schema> --out <pulled store>` adds only the
+pairs of the new alleles.
+
 ### Protein stores
 
 The same format holds protein-level results for the `aa-*` modes and

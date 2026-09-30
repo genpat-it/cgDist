@@ -7,6 +7,8 @@ to show that the format can be read without cgdist, and to test conformance.
     cgds_reader.py verify <store dir | .cgpack>        sha256 + decoding + counts
     cgds_reader.py dump   <store dir | .cgpack> <locus>   TSV of the locus pairs
     cgds_reader.py summary <store dir | .cgpack>       per-locus JSON summaries
+    cgds_reader.py digests <store dir | .cgpack> <schema dir>   (DNA stores)
+                   check every stored sequence digest against the schema
 
 Exit code 1 on any problem.
 """
@@ -269,6 +271,31 @@ def main(argv):
         for locus in m["loci"]:
             out[locus] = summary(*st.locus(locus))
         json.dump(out, sys.stdout)
+    elif cmd == "digests":
+        import zlib
+        schema = Path(argv[3])
+        checked = bad = 0
+        for locus in m["loci"]:
+            f = schema / f"{locus}.fasta"
+            if not f.exists():
+                continue
+            seqs, cur = {}, []
+            for line in f.read_text().splitlines() + [">"]:
+                if line.startswith(">"):
+                    if cur:
+                        sq = "".join(cur).encode()
+                        seqs[zlib.crc32(sq) & 0xFFFFFFFF] = sq
+                    cur = []
+                elif line.strip():
+                    cur.append(line.strip())
+            for h, _, d in st.locus(locus)[0]:
+                if d and h in seqs:
+                    checked += 1
+                    if seq_digest(seqs[h]) != d:
+                        bad += 1
+                        print(f"✗ {locus}: allele {h} has another sequence than in the store")
+        print(f"{checked} digests checked, {bad} mismatches")
+        return 1 if bad else 0
     else:
         sys.exit(__doc__)
     return 0
