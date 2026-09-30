@@ -36,7 +36,10 @@ pub const MANIFEST_FILE: &str = "manifest.json";
 const LOCI_DIR: &str = "loci";
 const LOCUS_EXT: &str = "cgds";
 const LOCUS_MAGIC: &[u8; 4] = b"CGDS";
+/// Version written when the locus has sequence digests (2) or not (1).
+/// Readers accept both.
 const LOCUS_VERSION: u8 = 1;
+const LOCUS_VERSION_DIGESTS: u8 = 2;
 const LOCK_FILE: &str = ".lock";
 
 /// Numeric alignment parameters. Descriptions are deliberately excluded:
@@ -107,8 +110,20 @@ pub struct PairStats {
 pub struct LocusData {
     /// Allele CRC32 -> nucleotide length (0 = unknown).
     pub alleles: BTreeMap<u32, u32>,
+    /// Allele CRC32 -> 64-bit digest of its sequence (`seq_digest`), when
+    /// known. Tells apart two different sequences with the same CRC32: an
+    /// allele of a run whose sequence digest differs is not taken from the
+    /// store.
+    pub digests: BTreeMap<u32, u64>,
     /// (crc_lo, crc_hi) with crc_lo < crc_hi -> statistics.
     pub pairs: BTreeMap<(u32, u32), PairStats>,
+}
+
+/// 64-bit digest of an allele (or protein) sequence: the first 8 bytes of
+/// its SHA-256, little-endian; never 0 (0 means "unknown" in locus files).
+pub fn seq_digest(seq: &[u8]) -> u64 {
+    let h = Sha256::digest(seq);
+    u64::from_le_bytes(h[..8].try_into().unwrap()).max(1)
 }
 
 impl LocusData {
@@ -132,10 +147,21 @@ impl LocusData {
         self.pairs.insert(key, stats);
     }
 
+    /// Record the sequence digest of an allele (0 is ignored).
+    pub fn set_allele_digest(&mut self, crc: u32, digest: u64) {
+        self.alleles.entry(crc).or_insert(0);
+        if digest != 0 {
+            self.digests.insert(crc, digest);
+        }
+    }
+
     /// Merge `other` into `self`. On conflicting pairs `other` wins.
     pub fn merge(&mut self, other: LocusData) {
         for (crc, len) in other.alleles {
             self.set_allele_len(crc, len);
+        }
+        for (crc, d) in other.digests {
+            self.set_allele_digest(crc, d);
         }
         self.pairs.extend(other.pairs);
     }
@@ -208,24 +234,37 @@ impl LocusData {
             }
         }
 
+        // v2: sequence digests, one u64 LE per allele in table order (0 = unknown)
+        let version = if self.digests.is_empty() {
+            LOCUS_VERSION
+        } else {
+            for crc in &crcs {
+                body.extend_from_slice(&self.digests.get(crc).copied().unwrap_or(0).to_le_bytes());
+            }
+            LOCUS_VERSION_DIGESTS
+        };
+
         let mut out = Vec::with_capacity(body.len() / 2 + 8);
         out.extend_from_slice(LOCUS_MAGIC);
-        out.push(LOCUS_VERSION);
+        out.push(version);
         out.extend_from_slice(&lz4_flex::compress_prepend_size(&body));
         out
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         let mut data = LocusData::default();
-        decode_with(
+        let mut digests = Vec::new();
+        decode_with_digests(
             bytes,
             |alleles| {
                 data.alleles = alleles.iter().copied().collect();
             },
+            |d| digests = d.to_vec(),
             |a, b, s| {
                 data.pairs.insert((a, b), s);
             },
         )?;
+        data.digests = digests.into_iter().filter(|&(_, d)| d != 0).collect();
         Ok(data)
     }
 }
@@ -235,16 +274,27 @@ impl LocusData {
 /// huge loci without materialising them.
 pub fn decode_with(
     bytes: &[u8],
+    on_alleles: impl FnMut(&[(u32, u32)]),
+    on_pair: impl FnMut(u32, u32, PairStats),
+) -> Result<(), String> {
+    decode_with_digests(bytes, on_alleles, |_| {}, on_pair)
+}
+
+/// Like `decode_with`; `on_digests` also receives the (crc, digest) table
+/// (digest 0 = unknown; empty for version-1 files).
+pub fn decode_with_digests(
+    bytes: &[u8],
     mut on_alleles: impl FnMut(&[(u32, u32)]),
+    mut on_digests: impl FnMut(&[(u32, u64)]),
     mut on_pair: impl FnMut(u32, u32, PairStats),
 ) -> Result<(), String> {
     if bytes.len() < 5 || &bytes[..4] != LOCUS_MAGIC {
         return Err("not a cgdist locus file (bad magic)".to_string());
     }
-    if bytes[4] != LOCUS_VERSION {
+    let version = bytes[4];
+    if version != LOCUS_VERSION && version != LOCUS_VERSION_DIGESTS {
         return Err(format!(
-            "unsupported locus file version {} (this cgdist reads {})",
-            bytes[4], LOCUS_VERSION
+            "unsupported locus file version {version} (this cgdist reads {LOCUS_VERSION} and {LOCUS_VERSION_DIGESTS}); upgrade cgdist"
         ));
     }
     let body = lz4_flex::decompress_size_prepended(&bytes[5..])
@@ -318,6 +368,19 @@ pub fn decode_with(
             }
         }
         _ => return Err("corrupt locus file: bad coding flag".into()),
+    }
+    if version == LOCUS_VERSION_DIGESTS {
+        let need = alleles.len() * 8;
+        let tail = body
+            .get(r.pos..r.pos + need)
+            .ok_or("corrupt locus file: truncated digests")?;
+        let digests: Vec<(u32, u64)> = alleles
+            .iter()
+            .zip(tail.chunks_exact(8))
+            .map(|(&(c, _), b)| (c, u64::from_le_bytes(b.try_into().unwrap())))
+            .collect();
+        r.pos += need;
+        on_digests(&digests);
     }
     if r.pos != body.len() {
         return Err("corrupt locus file: trailing bytes".into());
@@ -912,5 +975,30 @@ mod tests {
         drop(l);
         assert!(st2.lock().is_ok());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn digests_roundtrip_v2_and_v1_unchanged() {
+        // no digests: version-1 file, byte-identical to what 0.x wrote
+        let v1 = sample();
+        let b1 = v1.encode();
+        assert_eq!(b1[4], 1);
+        assert_eq!(LocusData::decode(&b1).unwrap(), v1);
+        // digests: version 2, round-trips, unknown digests stay unknown
+        let mut v2 = sample();
+        let first = *v2.alleles.keys().next().unwrap();
+        v2.set_allele_digest(first, seq_digest(b"ACGT"));
+        let b2 = v2.encode();
+        assert_eq!(b2[4], 2);
+        let back = LocusData::decode(&b2).unwrap();
+        assert_eq!(back, v2);
+        assert_eq!(back.digests.len(), 1);
+        // truncated digest column is rejected
+        let body = lz4_flex::decompress_size_prepended(&b2[5..]).unwrap();
+        let mut cut = b2[..5].to_vec();
+        cut.extend_from_slice(&lz4_flex::compress_prepend_size(&body[..body.len() - 3]));
+        assert!(LocusData::decode(&cut).is_err());
+        assert_ne!(seq_digest(b"ACGT"), seq_digest(b"ACGA"));
+        assert_ne!(seq_digest(b""), 0);
     }
 }

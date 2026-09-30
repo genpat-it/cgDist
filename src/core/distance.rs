@@ -141,6 +141,9 @@ pub struct DistanceEngine {
     save_alignments_path: Option<String>,
     // Fraction of new alignments re-checked against parasail's original kernel
     verify_fraction: f64,
+    /// allele pairs that could not be aligned in this run (missing sequence
+    /// or alignment failure); they contribute no alignment-based distance
+    unaligned_pairs: usize,
     // Genetic code for synonymous/nonsynonymous counts (None = not computed)
     coding: Option<GeneticCode>,
     // Genetic code of the coding counts loaded from the cache file
@@ -480,6 +483,7 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
+            unaligned_pairs: 0,
             coding: None,
             loaded_code: None,
             weights: DistanceWeights::default(),
@@ -505,6 +509,7 @@ impl DistanceEngine {
             has_new_entries: false,
             save_alignments_path: None,
             verify_fraction: 0.0,
+            unaligned_pairs: 0,
             coding: None,
             loaded_code: None,
             weights: DistanceWeights::default(),
@@ -1321,6 +1326,7 @@ impl DistanceEngine {
             );
         }
         if !unaligned.is_empty() {
+            self.unaligned_pairs += unaligned.len();
             self.report_unaligned(&unaligned, total_pairs);
         }
         if !self.quiet {
@@ -1894,16 +1900,25 @@ impl DistanceEngine {
             .map(|(l, e)| source.locus_bytes(e).map(|b| ((*l).clone(), b)))
             .collect::<Result<_, _>>()?;
         let mut added = 0usize;
+        let mut clashes: Vec<(String, u32)> = Vec::new();
         for (locus, bytes) in blobs {
             let want = &needed[&locus];
             let mut lens: HashMap<u32, u32> = HashMap::new();
+            let mut digests: HashMap<u32, u64> = HashMap::new();
             let mut rows: Vec<(u32, u32, crate::store::PairStats)> = Vec::new();
-            crate::store::decode_with(
+            crate::store::decode_with_digests(
                 &bytes,
                 |alleles| {
                     for &(c, l) in alleles {
                         if want.contains(&c) && l > 0 {
                             lens.insert(c, l);
+                        }
+                    }
+                },
+                |ds| {
+                    for &(c, d) in ds {
+                        if d != 0 && want.contains(&c) {
+                            digests.insert(c, d);
                         }
                     }
                 },
@@ -1914,7 +1929,32 @@ impl DistanceEngine {
                 },
             )
             .map_err(|e| format!("locus {locus}: {e}"))?;
+            // An allele of this run whose sequence differs from the store's
+            // allele with the same CRC32 (digest, or length for stores
+            // without digests) is a hash collision: none of its pairs are
+            // taken from the store; they are aligned from the run's schema.
+            let mut bad: HashSet<u32> = HashSet::new();
+            if let Some(db) = &self.sequence_db {
+                for &c in want {
+                    let Some(si) = db.get_sequence(&locus, c) else {
+                        continue;
+                    };
+                    let differs = match digests.get(&c) {
+                        Some(&d) => d != crate::store::seq_digest(&si.sequence),
+                        None => lens
+                            .get(&c)
+                            .is_some_and(|&l| l as usize != si.sequence.len()),
+                    };
+                    if differs {
+                        bad.insert(c);
+                        clashes.push((locus.clone(), c));
+                    }
+                }
+            }
             for (a, b, st) in rows {
+                if bad.contains(&a) || bad.contains(&b) {
+                    continue;
+                }
                 let key = DistanceCacheKey {
                     locus: locus.clone(),
                     crc1: a,
@@ -1944,6 +1984,21 @@ impl DistanceEngine {
                 );
                 added += 1;
             }
+        }
+        if !clashes.is_empty() {
+            let ex: Vec<String> = clashes
+                .iter()
+                .take(5)
+                .map(|(l, c)| format!("{l}:{c}"))
+                .collect();
+            eprintln!(
+                "⚠️  WARNING: {} alleles of this run have the same CRC32 as a DIFFERENT sequence in \
+                 cache store {} (e.g. {}); their pairs are not taken from it and are aligned from \
+                 your schema instead",
+                clashes.len(),
+                source.describe(),
+                ex.join(", ")
+            );
         }
         Ok(added)
     }
@@ -1979,11 +2034,32 @@ impl DistanceEngine {
             by_locus.entry(k.locus.as_str()).or_default().push(k);
         }
         let mut pairs = 0usize;
+        let mut clashes = 0usize;
         let n_loci = by_locus.len();
         for (locus, keys) in by_locus {
             let mut data = store.read_locus(locus)?.unwrap_or_default();
+            let digest_of = |crc: u32| {
+                self.sequence_db
+                    .as_ref()
+                    .and_then(|db| db.get_sequence(locus, crc))
+                    .map(|si| crate::store::seq_digest(&si.sequence))
+            };
             for k in keys {
                 let Some(e) = self.cache.get(k) else { continue };
+                // never store a pair under a CRC32 that the store holds for
+                // another sequence
+                let (d1, d2) = (digest_of(k.crc1), digest_of(k.crc2));
+                let clash = |crc: u32, d: Option<u64>| matches!((data.digests.get(&crc), d), (Some(a), Some(b)) if *a != b);
+                if clash(k.crc1, d1) || clash(k.crc2, d2) {
+                    clashes += 1;
+                    continue;
+                }
+                if let Some(d) = d1 {
+                    data.set_allele_digest(k.crc1, d);
+                }
+                if let Some(d) = d2 {
+                    data.set_allele_digest(k.crc2, d);
+                }
                 data.insert_pair(
                     k.crc1,
                     k.crc2,
@@ -2010,6 +2086,13 @@ impl DistanceEngine {
         }
         store.save_manifest()?;
         self.new_keys.clear();
+        if clashes > 0 {
+            eprintln!(
+                "⚠️  WARNING: {clashes} new pairs were not written to cache store {}: one of their \
+                 alleles has the same CRC32 as a different sequence already in the store",
+                store.root().display()
+            );
+        }
         Ok((n_loci, pairs))
     }
 
@@ -2049,6 +2132,11 @@ impl DistanceEngine {
     /// Alignment parameters of this engine.
     pub fn alignment_config(&self) -> &AlignmentConfig {
         &self.config
+    }
+
+    /// Allele pairs of this run that could not be aligned.
+    pub fn unaligned_pairs(&self) -> usize {
+        self.unaligned_pairs
     }
 
     /// Enable protein-level results (protein modes, aa_* weights).
@@ -2761,5 +2849,58 @@ mod tests {
         assert!(written_before_hamming_fix("0.1.2-beta"));
         assert!(!written_before_hamming_fix("0.1.4"));
         assert!(!written_before_hamming_fix("0.2.0"));
+    }
+
+    #[test]
+    fn store_alleles_with_another_sequence_are_not_used() {
+        use crate::store::{seq_digest, AlignmentParams, LocusData, PairStats, Store, StoreParams};
+        let dir = std::env::temp_dir().join(format!("cgdist_collision_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let config = AlignmentConfig::default();
+        let mut st = Store::create(
+            &dir,
+            "crc32",
+            StoreParams::Dna(AlignmentParams::from(&config)),
+        )
+        .unwrap();
+        let mut d = LocusData::default();
+        d.insert_pair(
+            10,
+            20,
+            PairStats {
+                snps: 99,
+                ..Default::default()
+            },
+        );
+        d.set_allele_digest(10, seq_digest(b"ACGTACGTAC"));
+        d.set_allele_digest(20, seq_digest(b"ACGTTCGTAC"));
+        st.write_locus("L1", &d).unwrap();
+        st.save_manifest().unwrap();
+        let src = crate::store::remote::Source::parse(dir.to_str().unwrap());
+        let needed: HashMap<String, HashSet<u32>> =
+            [("L1".to_string(), [10u32, 20].into_iter().collect())]
+                .into_iter()
+                .collect();
+        let engine_with = |s20: &[u8]| {
+            let mut db = SequenceDatabase::new();
+            for (crc, seq) in [(10u32, b"ACGTACGTAC".as_slice()), (20, s20)] {
+                db.add_sequence(
+                    "L1".into(),
+                    crc,
+                    crate::data::SequenceInfo {
+                        sequence: seq.to_vec(),
+                        id: crc.to_string(),
+                    },
+                );
+            }
+            DistanceEngine::with_sequences(config.clone(), db, "crc32".into())
+        };
+        // same sequences: the pair is taken from the store
+        let mut e = engine_with(b"ACGTTCGTAC");
+        assert_eq!(e.load_from_source(&src, &needed).unwrap(), 1);
+        // allele 20 of the run is another sequence with the same CRC32: not used
+        let mut e = engine_with(b"GGGGGGGGGG");
+        assert_eq!(e.load_from_source(&src, &needed).unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

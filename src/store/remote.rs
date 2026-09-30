@@ -17,7 +17,7 @@
 // already present with the same checksum are skipped, so a repeated pull is
 // an incremental update.
 
-use super::{sha256_hex, LocusEntry, Manifest, Store, MANIFEST_FILE};
+use super::{sha256_hex, LocusData, LocusEntry, Manifest, Store, MANIFEST_FILE};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -256,6 +256,8 @@ pub fn pack(store_dir: &Path, out: &Path) -> Result<usize, String> {
 pub struct PullStats {
     pub fetched: usize,
     pub up_to_date: usize,
+    /// loci merged with local content (pairs the source does not have)
+    pub merged: usize,
     pub not_in_source: usize,
     pub bytes: u64,
 }
@@ -263,6 +265,11 @@ pub struct PullStats {
 /// Mirror `loci` (all loci when `None`) of `source` into the store at `dest`.
 /// The destination adopts the source's hasher, alignment parameters, genetic
 /// code and schema description; an existing destination must match them.
+///
+/// A locus the destination already holds with other content (e.g. pairs of
+/// new alleles added locally) is merged, never replaced: the result has every
+/// pair of both. A pair present in both with different statistics is an
+/// error (the two stores are not from the same computation).
 pub fn pull(
     source: &Source,
     dest: &Path,
@@ -314,13 +321,86 @@ pub fn pull(
             .collect::<Result<_, _>>()?;
         for (locus, bytes, e) in got {
             stats.bytes += bytes.len() as u64;
-            store.put_locus_bytes(&locus, &bytes, e.alleles, e.pairs, e.complete)?;
             stats.fetched += 1;
+            if store.manifest.loci.contains_key(&locus) {
+                let local = store.read_locus(&locus)?.unwrap_or_default();
+                let remote_data =
+                    LocusData::decode(&bytes).map_err(|err| format!("locus {locus}: {err}"))?;
+                match merge_locus(&locus, remote_data, local)? {
+                    None => {
+                        store.put_locus_bytes(&locus, &bytes, e.alleles, e.pairs, e.complete)?
+                    }
+                    Some(merged) => {
+                        store.write_locus(&locus, &merged)?;
+                        stats.merged += 1;
+                    }
+                }
+            } else {
+                store.put_locus_bytes(&locus, &bytes, e.alleles, e.pairs, e.complete)?;
+            }
         }
         store.save_manifest()?;
     }
     store.save_manifest()?;
     Ok(stats)
+}
+
+/// Union of a downloaded locus and the local one. None when the local locus
+/// adds nothing (the downloaded bytes can be stored as they are).
+fn merge_locus(
+    locus: &str,
+    remote: LocusData,
+    local: LocusData,
+) -> Result<Option<LocusData>, String> {
+    let mut merged = remote.clone();
+    let mut added = false;
+    for (k, l) in &local.pairs {
+        match merged.pairs.get_mut(k) {
+            Some(r) => {
+                if (r.snps, r.indel_events, r.indel_bases)
+                    != (l.snps, l.indel_events, l.indel_bases)
+                    || (r.coding.is_some() && l.coding.is_some() && r.coding != l.coding)
+                {
+                    return Err(format!(
+                        "locus {locus}: pair {}-{} differs between the local store and the source \
+                         ({l:?} vs {r:?}); refusing to merge stores from different computations",
+                        k.0, k.1
+                    ));
+                }
+                if r.coding.is_none() && l.coding.is_some() {
+                    r.coding = l.coding;
+                    added = true;
+                }
+            }
+            None => {
+                merged.pairs.insert(*k, *l);
+                added = true;
+            }
+        }
+    }
+    for (crc, d) in &local.digests {
+        match merged.digests.get(crc) {
+            Some(r) if r != d => {
+                return Err(format!(
+                    "locus {locus}: allele {crc} has different sequences in the local store and \
+                     the source (hash collision); refusing to merge"
+                ))
+            }
+            Some(_) => {}
+            None => {
+                merged.set_allele_digest(*crc, *d);
+                added = true;
+            }
+        }
+    }
+    for (crc, len) in &local.alleles {
+        let known = merged.alleles.get(crc).copied();
+        if known.is_none() || (known == Some(0) && *len > 0) {
+            added = true;
+        }
+        merged.set_allele_len(*crc, *len);
+    }
+    Ok(added.then_some(merged))
 }
 
 #[cfg(test)]
@@ -388,5 +468,40 @@ mod tests {
             .count();
         assert_eq!(bad, 1);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn pull_merges_local_pairs_instead_of_replacing_them() {
+        let st = |snps| PairStats {
+            snps,
+            ..Default::default()
+        };
+        let mut remote = LocusData::default();
+        remote.set_allele_len(1, 900);
+        remote.set_allele_len(2, 900);
+        remote.insert_pair(1, 2, st(3));
+        // local = remote + a new allele (3) with its pairs
+        let mut local = remote.clone();
+        local.set_allele_len(3, 903);
+        local.insert_pair(1, 3, st(1));
+        local.insert_pair(2, 3, st(4));
+        let m = merge_locus("L", remote.clone(), local).unwrap().unwrap();
+        assert_eq!(m.pairs.len(), 3);
+        assert_eq!(m.alleles[&3], 903);
+        assert!(m.is_complete());
+        // nothing local to add: the downloaded bytes are kept as they are
+        assert!(merge_locus("L", remote.clone(), remote.clone())
+            .unwrap()
+            .is_none());
+        // same hash, different sequence digest: refuse
+        let mut r2 = remote.clone();
+        r2.set_allele_digest(1, crate::store::seq_digest(b"AAAA"));
+        let mut l2 = remote.clone();
+        l2.set_allele_digest(1, crate::store::seq_digest(b"CCCC"));
+        assert!(merge_locus("L", r2, l2).is_err());
+        // same pair, different values: refuse
+        let mut bad = remote.clone();
+        bad.insert_pair(1, 2, st(4));
+        assert!(merge_locus("L", remote, bad).is_err());
     }
 }

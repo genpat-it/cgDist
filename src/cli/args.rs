@@ -186,6 +186,12 @@ pub struct Args {
     #[argh(option, default = "1")]
     pub aa_gap_extend: i32,
 
+    /// stop with an error if any allele pair cannot be aligned (e.g. an
+    /// allele of the profiles missing from --schema), instead of warning and
+    /// counting it as 0; recommended for surveillance
+    #[argh(switch)]
+    pub fail_on_unaligned: bool,
+
     /// protein-level cache file (.lz4) for aa-* modes and aa_* weights
     #[argh(option)]
     pub protein_cache_file: Option<String>,

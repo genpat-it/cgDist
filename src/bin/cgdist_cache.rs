@@ -305,6 +305,7 @@ fn build(a: Build) -> Result<(), String> {
     let start = Instant::now();
     let mut last_save = Instant::now();
     let (mut done_pairs, mut total_new) = (0u64, 0u64);
+    let mut clashes = 0usize;
     let n_files = files.len();
     for (fi, path) in files.iter().enumerate() {
         let locus = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -334,8 +335,24 @@ fn build(a: Build) -> Result<(), String> {
             continue;
         }
         let mut data = store.read_locus(&locus)?.unwrap_or_default();
+        // a store allele with this CRC32 but another sequence: its pairs
+        // belong to a different allele; never mix them
+        let clash = alleles.iter().find(|(crc, (_, seq))| {
+            data.digests
+                .get(crc)
+                .is_some_and(|&d| d != cgdist::store::seq_digest(seq))
+        });
+        if let Some((crc, _)) = clash {
+            eprintln!(
+                "❌ {locus}: allele {crc} of the schema has another sequence than the allele with the \
+                 same CRC32 in the store (hash collision or different schema); locus skipped"
+            );
+            clashes += 1;
+            continue;
+        }
         for (crc, (_, seq)) in &alleles {
             data.set_allele_len(*crc, seq.len() as u32);
+            data.set_allele_digest(*crc, cgdist::store::seq_digest(seq));
         }
         let crcs: Vec<u32> = alleles.keys().copied().collect();
         let n = crcs.len();
@@ -403,6 +420,11 @@ fn build(a: Build) -> Result<(), String> {
         store.manifest.loci.len(),
         start.elapsed().as_secs_f64()
     );
+    if clashes > 0 {
+        return Err(format!(
+            "{clashes} loci skipped: schema alleles collide with different store alleles (see above)"
+        ));
+    }
     Ok(())
 }
 
@@ -451,6 +473,7 @@ fn build_protein(a: Build) -> Result<(), String> {
     let start = Instant::now();
     let mut last_save = Instant::now();
     let (mut done_pairs, mut total_new, mut failed) = (0u64, 0u64, 0u64);
+    let mut clashes = 0usize;
     let n_files = files.len();
     for (fi, path) in files.iter().enumerate() {
         let locus = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -479,8 +502,22 @@ fn build_protein(a: Build) -> Result<(), String> {
             continue;
         }
         let mut data = store.read_locus(&locus)?.unwrap_or_default();
+        let clash = proteins.iter().find(|(h, p)| {
+            data.digests
+                .get(h)
+                .is_some_and(|&d| d != cgdist::store::seq_digest(p))
+        });
+        if let Some((h, _)) = clash {
+            eprintln!(
+                "❌ {locus}: protein {h} of the schema differs from the protein with the same hash \
+                 in the store (hash collision or different schema); locus skipped"
+            );
+            clashes += 1;
+            continue;
+        }
         for (h, p) in &proteins {
             data.set_allele_len(*h, p.len() as u32);
+            data.set_allele_digest(*h, cgdist::store::seq_digest(p));
         }
         let hs: Vec<u32> = proteins.keys().copied().collect();
         let n = hs.len();
@@ -537,6 +574,11 @@ fn build_protein(a: Build) -> Result<(), String> {
         store.manifest.loci.len(),
         start.elapsed().as_secs_f64()
     );
+    if clashes > 0 {
+        return Err(format!(
+            "{clashes} loci skipped: schema proteins collide with different store proteins (see above)"
+        ));
+    }
     Ok(())
 }
 
@@ -898,6 +940,43 @@ struct Realign {
 }
 
 /// Recompute the selected pairs of one locus from the schema and compare.
+/// Alleles (or proteins) of a store whose sequence digest differs from the
+/// schema's sequence with the same hash; alleles without digest are skipped.
+fn digest_mismatches(
+    m: &cgdist::store::Manifest,
+    d: &LocusData,
+    seqs: &BTreeMap<u32, Vec<u8>>,
+) -> Result<(usize, usize), String> {
+    let (mut checked, mut bad) = (0usize, 0usize);
+    let own: BTreeMap<u32, u64> = match m.params()? {
+        StoreParams::Dna(_) => seqs
+            .iter()
+            .map(|(c, s)| (*c, cgdist::store::seq_digest(s)))
+            .collect(),
+        StoreParams::Protein(p) => {
+            let code = p.code()?;
+            seqs.values()
+                .map(|s| {
+                    let pr = protein_distance::protein_of(&code, s);
+                    (
+                        protein_distance::protein_hash(&pr),
+                        cgdist::store::seq_digest(&pr),
+                    )
+                })
+                .collect()
+        }
+    };
+    for (h, dg) in &d.digests {
+        if let Some(o) = own.get(h) {
+            checked += 1;
+            if o != dg {
+                bad += 1;
+            }
+        }
+    }
+    Ok((checked, bad))
+}
+
 fn realign_locus(
     m: &cgdist::store::Manifest,
     locus: &str,
@@ -1018,6 +1097,7 @@ fn verify(a: Verify) -> Result<(), String> {
     let m = src.manifest()?;
     let mut problems = 0usize;
     let mut total = Realign::default();
+    let (mut digests_checked, mut digest_bad) = (0usize, 0usize);
     for (locus, e) in &m.loci {
         match src.locus_bytes(e).and_then(|b| LocusData::decode(&b)) {
             Ok(d) => {
@@ -1028,9 +1108,22 @@ fn verify(a: Verify) -> Result<(), String> {
                     eprintln!("✗ {locus}: counts differ from the manifest");
                     problems += 1;
                 }
-                if let (Some(dir), true) = (&a.schema, a.realign > 0.0) {
+                if let Some(dir) = &a.schema {
                     match schema_locus(dir, locus)? {
                         Some(seqs) => {
+                            let (c, bad) = digest_mismatches(&m, &d, &seqs)?;
+                            digests_checked += c;
+                            if bad > 0 {
+                                eprintln!(
+                                    "✗ {locus}: {bad} store alleles have the same hash as a different \
+                                     sequence of the schema"
+                                );
+                                digest_bad += bad;
+                                problems += 1;
+                            }
+                            if a.realign <= 0.0 {
+                                continue;
+                            }
                             let r = realign_locus(&m, locus, &d, &seqs, a.realign)?;
                             if r.mismatches > 0 {
                                 problems += 1;
@@ -1048,6 +1141,12 @@ fn verify(a: Verify) -> Result<(), String> {
                 problems += 1;
             }
         }
+    }
+    if a.schema.is_some() {
+        println!(
+            "🧬 sequence digests: {digests_checked} store alleles checked against the schema, \
+             {digest_bad} mismatches"
+        );
     }
     if a.realign > 0.0 {
         println!(
@@ -1100,6 +1199,12 @@ fn main() {
                     st.up_to_date,
                     st.not_in_source
                 );
+                if st.merged > 0 {
+                    println!(
+                        "🔀 {} loci kept their local pairs: merged with the downloaded ones",
+                        st.merged
+                    );
+                }
                 Ok(())
             })
         }

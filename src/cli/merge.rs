@@ -174,6 +174,9 @@ impl Args {
                 self.aa_gap_extend = v;
             }
         }
+        if !self.fail_on_unaligned {
+            self.fail_on_unaligned = config.fail_on_unaligned.unwrap_or(false);
+        }
         if self.protein_cache_file.is_none() {
             self.protein_cache_file = config.protein_cache_file;
         }

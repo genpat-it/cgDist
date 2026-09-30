@@ -473,6 +473,16 @@ fn run_main() -> Result<(), String> {
         println!("🔨 Using Hamming hasher - no alignment precomputation needed");
     }
 
+    if args.fail_on_unaligned && engine.unaligned_pairs() > 0 {
+        eprintln!(
+            "❌ ERROR: {} allele pairs could not be aligned (see the warning above) and \
+             --fail-on-unaligned is set: no distances written. Use the schema the profiles were \
+             called with, including its new alleles.",
+            engine.unaligned_pairs()
+        );
+        std::process::exit(1);
+    }
+
     // Write the pairs aligned in this run to the cache store
     if let (Some(dir), true) = (&args.cache_dir, args.hasher_type != "hamming") {
         let params = cgdist::store::StoreParams::Dna(cgdist::store::AlignmentParams::from(
@@ -539,6 +549,16 @@ fn run_main() -> Result<(), String> {
         if let Err(e) = engine.precompute_proteins(&unique_pairs, &sources) {
             eprintln!("❌ ERROR: {e}");
             std::process::exit(1);
+        }
+        if args.fail_on_unaligned {
+            let unknown = engine.protein_store().map_or(0, |p| p.unknown_alleles);
+            if unknown > 0 {
+                eprintln!(
+                    "❌ ERROR: {unknown} allele pairs have an allele without sequence in the schema \
+                     and --fail-on-unaligned is set: no distances written"
+                );
+                std::process::exit(1);
+            }
         }
         if let Some(dir) = &args.protein_cache_dir {
             let settings = validation_result.protein.clone().unwrap();

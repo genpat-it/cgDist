@@ -224,6 +224,8 @@ pub struct ProteinStore {
     new_keys: HashSet<(String, u32, u32)>,
     /// (locus, protein hash) -> amino-acid length, for proteins of this run
     lens: HashMap<(String, u32), u32>,
+    /// (locus, protein hash) -> sequence digest, for proteins of this run
+    digests: HashMap<(String, u32), u64>,
     /// allele pairs (locus, dna lo, dna hi) whose protein is unknown (no
     /// sequence in the schema)
     pub unknown_alleles: usize,
@@ -241,6 +243,7 @@ impl ProteinStore {
             has_new: false,
             new_keys: HashSet::new(),
             lens: HashMap::new(),
+            digests: HashMap::new(),
             unknown_alleles: 0,
         })
     }
@@ -355,6 +358,8 @@ impl ProteinStore {
         }
         for ((l, h), p) in &protein_seq {
             self.lens.insert((l.clone(), *h), p.len() as u32);
+            self.digests
+                .insert((l.clone(), *h), crate::store::seq_digest(p));
         }
         // 2. pairs from protein cache stores (read-only layers first to last)
         if !sources.is_empty() {
@@ -449,16 +454,25 @@ impl ProteinStore {
             .map(|(l, e)| source.locus_bytes(e).map(|b| ((*l).clone(), b)))
             .collect::<Result<_, _>>()?;
         let mut added = 0usize;
+        let mut clashes: Vec<(String, u32)> = Vec::new();
         for (locus, bytes) in blobs {
             let want = &needed[&locus];
             let mut store_len: HashMap<u32, u32> = HashMap::new();
+            let mut store_dig: HashMap<u32, u64> = HashMap::new();
             let mut rows: Vec<(u32, u32, crate::store::PairStats)> = Vec::new();
-            crate::store::decode_with(
+            crate::store::decode_with_digests(
                 &bytes,
                 |alleles| {
                     for &(h, l) in alleles {
                         if want.contains(&h) {
                             store_len.insert(h, l);
+                        }
+                    }
+                },
+                |ds| {
+                    for &(h, d) in ds {
+                        if d != 0 && want.contains(&h) {
+                            store_dig.insert(h, d);
                         }
                     }
                 },
@@ -469,19 +483,26 @@ impl ProteinStore {
                 },
             )
             .map_err(|e| format!("locus {locus}: {e}"))?;
-            for (h, l) in &store_len {
-                let mine = self.lens.get(&(locus.clone(), *h)).copied();
-                if *l > 0 && mine.is_some_and(|m| m != *l) {
-                    return Err(format!(
-                        "protein store {}: locus {locus}, protein {h} has {l} residues in the store \
-                         but {} here (protein-hash collision or different sequences); \
-                         refusing to use it",
-                        source.describe(),
-                        mine.unwrap()
-                    ));
+            // a protein of this run that differs from the store's protein
+            // with the same hash (digest, or length for stores without
+            // digests): its pairs are aligned here instead
+            let mut bad: HashSet<u32> = HashSet::new();
+            for &h in want {
+                let key = (locus.clone(), h);
+                let differs = match (store_dig.get(&h), self.digests.get(&key)) {
+                    (Some(a), Some(b)) => a != b,
+                    _ => matches!((store_len.get(&h), self.lens.get(&key)),
+                        (Some(&a), Some(&b)) if a > 0 && a != b),
+                };
+                if differs {
+                    bad.insert(h);
+                    clashes.push((locus.clone(), h));
                 }
             }
             for (a, b, st) in rows {
+                if bad.contains(&a) || bad.contains(&b) {
+                    continue;
+                }
                 let key = (locus.clone(), a, b);
                 if self.pairs.contains_key(&key) {
                     continue;
@@ -505,6 +526,20 @@ impl ProteinStore {
                 added += 1;
             }
         }
+        if !clashes.is_empty() {
+            let ex: Vec<String> = clashes
+                .iter()
+                .take(5)
+                .map(|(l, h)| format!("{l}:{h}"))
+                .collect();
+            eprintln!(
+                "⚠️  WARNING: {} proteins of this run have the same hash as a DIFFERENT protein in \
+                 protein store {} (e.g. {}); their pairs are not taken from it and are aligned here",
+                clashes.len(),
+                source.describe(),
+                ex.join(", ")
+            );
+        }
         Ok(added)
     }
 
@@ -526,11 +561,25 @@ impl ProteinStore {
         for k in &self.new_keys {
             by_locus.entry(k.0.as_str()).or_default().push(k);
         }
-        let (n_loci, mut pairs) = (by_locus.len(), 0usize);
+        let (n_loci, mut pairs, mut clashes) = (by_locus.len(), 0usize, 0usize);
         for (locus, keys) in by_locus {
             let mut data = store.read_locus(locus)?.unwrap_or_default();
             for k in keys {
                 let Some(p) = self.pairs.get(k) else { continue };
+                let (d1, d2) = (
+                    self.digests.get(&(k.0.clone(), k.1)).copied(),
+                    self.digests.get(&(k.0.clone(), k.2)).copied(),
+                );
+                let clash = |h: u32, d: Option<u64>| matches!((data.digests.get(&h), d), (Some(a), Some(b)) if *a != b);
+                if clash(k.1, d1) || clash(k.2, d2) {
+                    clashes += 1;
+                    continue;
+                }
+                for (h, d) in [(k.1, d1), (k.2, d2)] {
+                    if let Some(d) = d {
+                        data.set_allele_digest(h, d);
+                    }
+                }
                 data.insert_pair(k.1, k.2, pair_stats(p));
                 data.set_allele_len(k.1, p.aa_length1);
                 data.set_allele_len(k.2, p.aa_length2);
@@ -540,6 +589,13 @@ impl ProteinStore {
         }
         store.save_manifest()?;
         self.new_keys.clear();
+        if clashes > 0 {
+            eprintln!(
+                "⚠️  WARNING: {clashes} new protein pairs were not written to protein store {}: one of \
+                 their proteins has the same hash as a different protein already in the store",
+                store.root().display()
+            );
+        }
         Ok((n_loci, pairs))
     }
 
