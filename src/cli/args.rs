@@ -157,7 +157,8 @@ pub struct Args {
     /// weights for --mode custom: per-locus contribution = sum of
     /// weight*count, e.g. "nonsyn=1,frame_disrupted=1,indel_events=1"; keys:
     /// allele (1 per differing locus), snps, indel_events, indel_bases, syn,
-    /// nonsyn, frame_disrupted; non-negative integers
+    /// nonsyn, frame_disrupted, and at protein level aa_allele, aa_subs, aa_indel_events,
+    /// aa_indel_residues; non-negative integers
     #[argh(option)]
     pub weights: Option<String>,
 
