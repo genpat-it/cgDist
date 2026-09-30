@@ -2,6 +2,10 @@
 // Kept as a deprecation shim that forwards every argument to the new binary so existing
 // scripts keep working.
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::process::{exit, Command};
 
 fn main() {

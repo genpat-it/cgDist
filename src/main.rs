@@ -2,6 +2,10 @@
 
 #![allow(unknown_lints, clippy::manual_is_multiple_of)]
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::collections::HashSet;
 use std::time::Instant;
 // Removed unused import

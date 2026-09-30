@@ -88,6 +88,15 @@ md5 = "0.7"
 # PERFORMANCE OPTIMIZATION
 # ============================================================================
 
+# mimalloc replaces malloc for the whole process (Rust and the parasail C
+# library alike). glibc's allocator serialises the per-pair allocations of
+# the traceback / coding paths under many threads (futex contention: 5x
+# slower at 16 threads); results are byte-identical. "override" keeps Rust
+# and C on one allocator, which parasail-rs requires: it frees C-allocated
+# traceback strings as Rust Strings.
+[target.'cfg(target_os = "linux")'.dependencies]
+mimalloc = { version = "0.1", default-features = false, features = ["override"] }
+
 [profile.release]
 opt-level = 3           # Maximum optimization
 lto = true              # Link-time optimization

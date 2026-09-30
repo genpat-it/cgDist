@@ -15,6 +15,10 @@
 // compute. It is incremental and resumable: only missing pairs are aligned,
 // and the manifest is saved after every locus.
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use argh::FromArgs;
 use cgdist::core::alignment::{AlignmentConfig, DistanceMode};
 use cgdist::core::distance::{DistanceEngine, GeneticCodeMeta, ModernCache};

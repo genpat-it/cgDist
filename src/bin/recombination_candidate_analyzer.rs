@@ -2,6 +2,10 @@
 // loci using an enriched cache (per-locus mutation density screen). The previous binary name
 // `recombination_analyzer` remains available as a deprecation shim that forwards to this binary.
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use clap::{Arg, Command};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -5,6 +5,10 @@
 // every SNP, insertion and deletion with its position and bases, plus the
 // CIGAR. With --cache-file it also checks the counts against the cache entry.
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use argh::FromArgs;
 use bio::io::fasta;
 use cgdist::core::alignment::{cigar_from_aligned, AlignmentConfig};
