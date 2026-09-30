@@ -21,8 +21,10 @@ pub struct Args {
     #[argh(option)]
     pub output: Option<String>,
 
-    /// distance mode: snps, snps-indel-contiguous, snps-indel-bases, hamming (default: snps).
-    /// Legacy alias: snps-indel-events == snps-indel-contiguous (deprecated).
+    /// distance mode (default: snps): snps, snps-indel-contiguous, snps-indel-bases,
+    /// hamming, nonsyn-snps, custom (with --weights), aa-hamming, aa-substitutions,
+    /// aa-substitutions-indel-events, aa-substitutions-indel-residues. Legacy alias:
+    /// snps-indel-events == snps-indel-contiguous (deprecated).
     #[argh(option, default = "String::from(\"snps\")")]
     pub mode: String,
 
