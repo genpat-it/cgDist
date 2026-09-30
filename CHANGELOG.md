@@ -14,6 +14,15 @@ until the API stabilizes).
   `nonsyn-snps`, `--save-alignments`, `--save-cigar`) under many threads,
   5-10x slower at 16-32 threads. Output is byte-identical.
 - `--cache-only` also accepts `--cache-dir` (it required `--cache-file`).
+- Certified banded aligner: on long, divergent alleles (heavy wgMLST loci)
+  the single-gap lower bound asks for a band too wide, and 88% of such pairs
+  fell back to parasail. It now aligns in a narrow probe band first and uses
+  that score (a real alignment, hence a lower bound) to size the certified
+  band; the band may cover the whole matrix before parasail is used
+  (cheaper than parasail's traceback kernel). Same certificate, so results
+  are unchanged: identical stores on 300 Listeria loci (3 presets) and on
+  the 24 heaviest S. pneumoniae loci (2.6x faster there), 0 differences in
+  200,000 adversarial fuzz cases and 1,800 long divergent pairs.
 - Alignments with traceback (protein pairs, the parasail fallback and the
   reference kernel of `--verify-alignments` / `verify --realign`) call
   parasail's C API directly (`core::parasail_trace`) instead of

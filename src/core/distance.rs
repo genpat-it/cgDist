@@ -383,7 +383,9 @@ pub fn align_pair_with_strings(
             gap_open: config.gap_open,
             gap_extend: config.gap_extend,
         };
-        if let Some((b, st)) = align_certified_with_strings(query, reference, &scoring, 0.5) {
+        if let Some((b, st)) =
+            align_certified_with_strings(query, reference, &scoring, BAND_MAX_FRACTION)
+        {
             let q = String::from_utf8_lossy(&st.query).into_owned();
             let r = String::from_utf8_lossy(&st.reference).into_owned();
             let (snps, indel_events, indel_bases) = compute_alignment_stats(&q, &r);
@@ -408,6 +410,13 @@ pub fn align_pair_with_strings(
         reference: tb.reference,
     })
 }
+
+/// Largest band (fraction of the full DP matrix) tried by the certified
+/// aligner before parasail. The certified band is cheaper than parasail's
+/// traceback kernel even on the whole matrix (heavy wgMLST loci: ~12 vs
+/// ~45-65 ms per pair of 5.7 kb alleles), so it is always tried; very large
+/// matrices are left to parasail (banded::MAX_BAND_CELLS).
+const BAND_MAX_FRACTION: f64 = 1.0;
 
 /// Deterministic choice of the pairs re-checked by --verify-alignments:
 /// depends only on the two allele hashes, not on threads or run order.
@@ -1452,9 +1461,12 @@ impl DistanceEngine {
                         gap_extend: self.config.gap_extend,
                     };
                     if !self.needs_strings() {
-                        if let Some(b) =
-                            align_certified(&seq1.sequence, &seq2.sequence, &scoring, 0.5)
-                        {
+                        if let Some(b) = align_certified(
+                            &seq1.sequence,
+                            &seq2.sequence,
+                            &scoring,
+                            BAND_MAX_FRACTION,
+                        ) {
                             return Some((b.snps, b.indel_events, b.indel_bases, None));
                         }
                     } else if seq1.sequence.is_ascii() && seq2.sequence.is_ascii() {
@@ -1467,7 +1479,7 @@ impl DistanceEngine {
                             &seq1.sequence,
                             &seq2.sequence,
                             &scoring,
-                            0.5,
+                            BAND_MAX_FRACTION,
                         ) {
                             let query = String::from_utf8_lossy(&st.query);
                             let reference = String::from_utf8_lossy(&st.reference);
@@ -2541,9 +2553,9 @@ pub fn calculate_distance_matrix(
 #[cfg(test)]
 mod tests {
     // parasail-rs itself: the reference the C-API path is compared with
-    use parasail_rs::Aligner;
     use super::*;
     use crate::data::SequenceInfo;
+    use parasail_rs::Aligner;
 
     fn crc(s: &[u8]) -> u32 {
         let mut h = crc32fast::Hasher::new();

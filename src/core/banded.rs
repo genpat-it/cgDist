@@ -136,8 +136,9 @@ thread_local! {
 
 /// Why a band attempt produced no result.
 enum Uncertified {
-    /// The band certificate does not hold.
-    Certificate,
+    /// The band certificate does not hold. Carries the best in-band score:
+    /// the score of a real alignment, hence a lower bound of the optimum.
+    Certificate(i64),
     /// Structural failure (should not happen); the caller falls back.
     Invalid,
 }
@@ -247,13 +248,13 @@ fn align_in_band(
     if dhi < mm {
         let ub = outside_upper_bound(nn, mm, dhi + 1, s);
         if (score as i64) <= ub {
-            return Err(Uncertified::Certificate);
+            return Err(Uncertified::Certificate(score as i64));
         }
     }
     if dlo > -nn {
         let ub = outside_upper_bound(nn, mm, dlo - 1, s);
         if (score as i64) <= ub {
-            return Err(Uncertified::Certificate);
+            return Err(Uncertified::Certificate(score as i64));
         }
     }
 
@@ -1057,10 +1058,10 @@ fn align_in_band_dp_impl<K: Kernel>(
     });
 
     if dhi < mm && (score as i64) <= outside_upper_bound(nn, mm, dhi + 1, s) {
-        return Err(Uncertified::Certificate);
+        return Err(Uncertified::Certificate(score as i64));
     }
     if dlo > -nn && (score as i64) <= outside_upper_bound(nn, mm, dlo - 1, s) {
-        return Err(Uncertified::Certificate);
+        return Err(Uncertified::Certificate(score as i64));
     }
 
     // 0 <= i < n and 0 <= j < m here, so (i + 1, j + 1) is an interior
@@ -1278,14 +1279,70 @@ fn certified(
     // the optimal score from below; the band it certifies is therefore
     // guaranteed to certify. On real allele pairs the bound is usually exact,
     // so one attempt with the narrowest provable band.
+    let fraction = |w: i64| {
+        let (dlo, dhi) = band_for(n, m, w);
+        let cells = (dhi - dlo + 1) as f64 * n as f64;
+        if cells > MAX_BAND_CELLS {
+            f64::INFINITY
+        } else {
+            cells / full
+        }
+    };
     let lb = simple_lower_bound(q, r, s);
     let w = needed_width(n, m, lb, s);
-    let (dlo, dhi) = band_for(n, m, w);
-    if (dhi - dlo + 1) as f64 * n as f64 > full * max_fraction {
-        return None;
+    // Usual case: the single-gap bound is (nearly) exact and its band is
+    // narrow. The band it certifies is guaranteed to certify.
+    if w <= PROBE_WIDTH {
+        if fraction(w) > max_fraction {
+            return None;
+        }
+        let (dlo, dhi) = band_for(n, m, w);
+        return align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Auto, strings).ok();
     }
-    align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Auto, strings).ok()
+    // Divergent alleles (many SNPs): the single-gap bound is weak and asks
+    // for a very wide band. Align in a narrow probe band first: its best
+    // score is the score of a real alignment, a much better lower bound, and
+    // the band that score certifies is again guaranteed to certify (a wider
+    // band only raises the best in-band score). The certificate is strict, so
+    // every optimal path lies in the band and the traceback is the same as on
+    // the full matrix.
+    let mut strings = strings;
+    let mut lb = lb;
+    let mut probe = PROBE_WIDTH;
+    loop {
+        let (dlo, dhi) = band_for(n, m, probe);
+        match align_in_band_dp(
+            q,
+            r,
+            s,
+            dlo,
+            dhi,
+            KernelChoice::Auto,
+            strings.as_deref_mut(),
+        ) {
+            Ok(b) => return Some(b),
+            Err(Uncertified::Certificate(score)) => lb = lb.max(score),
+            Err(Uncertified::Invalid) => return None,
+        }
+        let w2 = needed_width(n, m, lb, s).min(w);
+        // run the certified band unless a wider probe is still much cheaper
+        if w2 <= 4 * probe {
+            if fraction(w2) > max_fraction {
+                return None;
+            }
+            let (dlo, dhi) = band_for(n, m, w2);
+            return align_in_band_dp(q, r, s, dlo, dhi, KernelChoice::Auto, strings).ok();
+        }
+        probe *= 4;
+    }
 }
+
+/// Half-width of the probe band tried first on divergent pairs.
+const PROBE_WIDTH: i64 = 128;
+
+/// Largest band (cells) aligned here; above it the caller uses parasail,
+/// which bounds the per-thread traceback memory for very long alleles.
+const MAX_BAND_CELLS: f64 = 64e6;
 
 /// Hooks for exhaustive verification (examples/banded_exhaustive.rs); not a
 /// stable API.
@@ -1437,7 +1494,9 @@ mod tests {
                 let b = align_in_band(&q, &r, &s, dlo, dhi, &mut row);
                 match (a, b) {
                     (Ok(x), Ok(y)) => assert_eq!(x, y),
-                    (Err(Uncertified::Certificate), Err(Uncertified::Certificate)) => {}
+                    (Err(Uncertified::Certificate(x)), Err(Uncertified::Certificate(y))) => {
+                        assert_eq!(x, y, "in-band scores differ (w={w}, lens {n}/{m})")
+                    }
                     _ => panic!("layouts disagree on certification (w={w}, lens {n}/{m})"),
                 }
             }
@@ -1558,6 +1617,52 @@ mod tests {
             let (q, r) = random_pair(&mut rng);
             let s = PRESETS[rng.below(3) as usize];
             assert!(simple_lower_bound(&q, &r, &s) <= parasail(&q, &r, &s).score as i64);
+        }
+    }
+
+    /// Long divergent pairs take the probe path (single-gap bound too weak
+    /// for a narrow band): results must equal parasail's reference kernel.
+    #[test]
+    fn probe_path_matches_parasail_on_long_divergent_pairs() {
+        let mut seed = 99u64;
+        let mut next = move || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            seed >> 33
+        };
+        let s = Scoring {
+            match_score: 2,
+            mismatch: -1,
+            gap_open: 5,
+            gap_extend: 2,
+        };
+        for _ in 0..6 {
+            let q: Vec<u8> = (0..3000).map(|_| b"ACGT"[(next() % 4) as usize]).collect();
+            let mut r = Vec::new();
+            for &c in &q {
+                match next() % 100 {
+                    0..=14 => r.push(b"ACGT"[((c as u64 + 1 + next() % 3) % 4) as usize]),
+                    15 => {}
+                    16 => r.extend_from_slice(b"GATTACA"),
+                    _ => r.push(c),
+                }
+            }
+            let lb = simple_lower_bound(&q, &r, &s);
+            assert!(needed_width(q.len() as i64, r.len() as i64, lb, &s) > PROBE_WIDTH);
+            let (b, st) = align_certified_with_strings(&q, &r, &s, 1.0).expect("certified");
+            let want = crate::core::parasail_trace::NwTracer::new(
+                "nw_trace_striped_sat",
+                parasail_rs::Matrix::create(b"ACGT", 2, -1).unwrap(),
+                5,
+                2,
+            )
+            .unwrap()
+            .align(&q, &r)
+            .unwrap();
+            assert_eq!(b.score, want.score);
+            assert_eq!(st.query, want.query.as_bytes());
+            assert_eq!(st.reference, want.reference.as_bytes());
         }
     }
 }
