@@ -319,6 +319,7 @@ dependencies = [
  "crc32fast",
  "csv",
  "indicatif",
+ "libparasail-sys",
  "lz4_flex",
  "md5",
  "mimalloc",

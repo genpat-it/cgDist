@@ -17,7 +17,7 @@
 use crate::core::alignment::compute_alignment_stats;
 use crate::core::protein::GeneticCode;
 use crate::data::SequenceDatabase;
-use parasail_rs::{Aligner, Matrix};
+use parasail_rs::Matrix;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -100,7 +100,7 @@ pub fn protein_hash(p: &[u8]) -> u32 {
 }
 
 thread_local! {
-    static AA_ALIGNERS: RefCell<Vec<(ProteinSettings, i32, Aligner)>> = const { RefCell::new(Vec::new()) };
+    static AA_ALIGNERS: RefCell<Vec<(ProteinSettings, i32, crate::core::parasail_trace::NwTracer)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Align two proteins (global, traceback) and count substitutions and
@@ -145,25 +145,23 @@ pub fn align_proteins_with_strings(
             let idx = match v.iter().position(|(k, w, _)| k == s && *w == width) {
                 Some(i) => i,
                 None => {
+                    // the kernel parasail-rs builds from
+                    // global().use_trace().scan().solution_width(width)
                     let m = s.load_matrix().ok()?;
-                    let a = Aligner::new()
-                        .matrix(m)
-                        .gap_open(s.gap_open)
-                        .gap_extend(s.gap_extend)
-                        .global()
-                        .use_trace()
-                        .scan()
-                        .solution_width(width)
-                        .build();
+                    let a = crate::core::parasail_trace::NwTracer::new(
+                        &format!("nw_trace_scan_{width}"),
+                        m,
+                        s.gap_open,
+                        s.gap_extend,
+                    )?;
                     v.push((s.clone(), width, a));
                     v.len() - 1
                 }
             };
-            let res = v[idx].2.align(Some(p1), p2).ok()?;
-            if res.is_saturated() {
+            let tb = v[idx].2.align(p1, p2).ok()?;
+            if tb.saturated {
                 return Some((None, true));
             }
-            let tb = res.get_traceback_strings(p1, p2).ok()?;
             let (subs, ev, residues) = compute_alignment_stats(&tb.query, &tb.reference);
             Some((
                 Some((

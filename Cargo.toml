@@ -37,6 +37,9 @@ exclude = [
 [dependencies]
 # Core alignment engine
 parasail-rs = "0.7.8"
+# direct access to the C API for traceback (see src/core/parasail_trace.rs);
+# the same crate parasail-rs links, so there is one parasail library
+libparasail-sys = "0.1.12"
 
 # Parallel processing
 rayon = "1.8"

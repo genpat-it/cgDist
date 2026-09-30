@@ -14,6 +14,13 @@ until the API stabilizes).
   `nonsyn-snps`, `--save-alignments`, `--save-cigar`) under many threads,
   5-10x slower at 16-32 threads. Output is byte-identical.
 - `--cache-only` also accepts `--cache-dir` (it required `--cache-file`).
+- Alignments with traceback (protein pairs, the parasail fallback and the
+  reference kernel of `--verify-alignments` / `verify --realign`) call
+  parasail's C API directly (`core::parasail_trace`) instead of
+  parasail-rs's `get_traceback_strings`, which frees C-allocated strings
+  with Rust's allocator and leaks ~32 bytes per call (reported upstream:
+  nsbuitrago/parasail-rs#23). Same kernels, matrices and gap penalties:
+  output byte-identical; protein builds no longer grow in memory.
 - `--mode` and `--weights` help list every mode and key.
 
 ### Added (protein stores)

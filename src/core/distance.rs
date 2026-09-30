@@ -10,7 +10,7 @@ use crate::data::{AllelicProfile, SequenceDatabase};
 use crate::hashers::{AlleleHasher, HasherRegistry};
 use chrono;
 use indicatif::{ProgressBar, ProgressStyle};
-use parasail_rs::{Aligner, Matrix};
+use parasail_rs::Matrix;
 use rayon::iter::ParallelIterator;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -285,7 +285,7 @@ thread_local! {
     /// gap_extend, solution width). Building an aligner allocates a scoring
     /// matrix and looks up the kernel, so it is done once per thread.
     #[allow(clippy::type_complexity)]
-    static ALIGNERS: std::cell::RefCell<Vec<((i32, i32, i32, i32, i32), Aligner)>> =
+    static ALIGNERS: std::cell::RefCell<Vec<((i32, i32, i32, i32, i32), crate::core::parasail_trace::NwTracer)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
@@ -301,8 +301,8 @@ fn align_global_trace(
     config: &AlignmentConfig,
     query: &[u8],
     reference: &[u8],
-) -> Option<Result<parasail_rs::AlignResult, parasail_rs::AlignError>> {
-    let run = |width: i32| -> Option<Result<parasail_rs::AlignResult, parasail_rs::AlignError>> {
+) -> Option<Result<crate::core::parasail_trace::Traced, String>> {
+    let run = |width: i32| -> Option<Result<crate::core::parasail_trace::Traced, String>> {
         let key = (
             config.match_score,
             config.mismatch_penalty,
@@ -315,23 +315,22 @@ fn align_global_trace(
             let idx = match aligners.iter().position(|(k, _)| *k == key) {
                 Some(i) => i,
                 None => {
+                    // the kernel parasail-rs builds from
+                    // global().use_trace().scan().solution_width(width)
                     let matrix =
                         Matrix::create(b"ACGT", config.match_score, config.mismatch_penalty)
                             .ok()?;
-                    let aligner = Aligner::new()
-                        .matrix(matrix)
-                        .gap_open(config.gap_open)
-                        .gap_extend(config.gap_extend)
-                        .global()
-                        .use_trace()
-                        .scan()
-                        .solution_width(width)
-                        .build();
+                    let aligner = crate::core::parasail_trace::NwTracer::new(
+                        &format!("nw_trace_scan_{width}"),
+                        matrix,
+                        config.gap_open,
+                        config.gap_extend,
+                    )?;
                     aligners.push((key, aligner));
                     aligners.len() - 1
                 }
             };
-            Some(aligners[idx].1.align(Some(query), reference))
+            Some(aligners[idx].1.align(query, reference))
         })
     };
     // Escalate precision only for the pairs that need it. A saturated result
@@ -339,12 +338,12 @@ fn align_global_trace(
     // actual overflow), and 64-bit cannot saturate for any real allele pair.
     for width in [16, 32] {
         match run(width)? {
-            Ok(res) if res.is_saturated() => continue,
+            Ok(res) if res.saturated => continue,
             other => return Some(other),
         }
     }
     match run(64)? {
-        Ok(res) if res.is_saturated() => {
+        Ok(res) if res.saturated => {
             panic!(
                 "alignment saturated even at 64-bit precision (sequence lengths {} and {})",
                 query.len(),
@@ -398,14 +397,13 @@ pub fn align_pair_with_strings(
             });
         }
     }
-    let res = align_global_trace(config, query, reference)?.ok()?;
-    let tb = res.get_traceback_strings(query, reference).ok()?;
+    let tb = align_global_trace(config, query, reference)?.ok()?;
     let (snps, indel_events, indel_bases) = compute_alignment_stats(&tb.query, &tb.reference);
     Some(PairAlignment {
         snps,
         indel_events,
         indel_bases,
-        score: res.get_score(),
+        score: tb.score,
         query: tb.query,
         reference: tb.reference,
     })
@@ -432,16 +430,16 @@ fn reference_alignment_stats(
     query: &[u8],
     reference: &[u8],
 ) -> Option<(usize, usize, usize)> {
+    // the kernel parasail-rs builds from global().use_trace(): striped,
+    // saturation-checked ("sat": it escalates the precision itself)
     let matrix = Matrix::create(b"ACGT", config.match_score, config.mismatch_penalty).ok()?;
-    let aligner = Aligner::new()
-        .matrix(matrix)
-        .gap_open(config.gap_open)
-        .gap_extend(config.gap_extend)
-        .global()
-        .use_trace()
-        .build();
-    let res = aligner.align(Some(query), reference).ok()?;
-    let tb = res.get_traceback_strings(query, reference).ok()?;
+    let aligner = crate::core::parasail_trace::NwTracer::new(
+        "nw_trace_striped_sat",
+        matrix,
+        config.gap_open,
+        config.gap_extend,
+    )?;
+    let tb = aligner.align(query, reference).ok()?;
     Some(compute_alignment_stats(&tb.query, &tb.reference))
 }
 
@@ -1494,41 +1492,30 @@ impl DistanceEngine {
                 let aligned = align_global_trace(&self.config, &seq1.sequence, &seq2.sequence)?;
 
                 match aligned {
-                    Ok(result) => {
-                        // Get traceback strings with gaps
-                        match result.get_traceback_strings(&seq1.sequence, &seq2.sequence) {
-                            Ok(traceback) => {
-                                // Use the proper alignment analysis with gaps
-                                let (snps, indel_events, indel_bases) =
-                                    compute_alignment_stats(&traceback.query, &traceback.reference);
+                    // alignment and traceback succeeded
+                    Ok(traceback) => {
+                        let (snps, indel_events, indel_bases) =
+                            compute_alignment_stats(&traceback.query, &traceback.reference);
 
-                                // Build the detailed alignment row only when
-                                // --save-alignments is active. Reading self here is
-                                // fine in the parallel context; the row is returned and
-                                // collected by the caller (which holds &mut self).
-                                let detail = self.needs_strings().then(|| {
-                                    self.pair_detail(
-                                        locus,
-                                        crc1,
-                                        crc2,
-                                        &seq1.sequence,
-                                        &seq2.sequence,
-                                        &traceback.query,
-                                        &traceback.reference,
-                                        (snps, indel_events, indel_bases),
-                                        result.get_score(),
-                                    )
-                                });
+                        // Build the detailed alignment row only when
+                        // --save-alignments is active. Reading self here is
+                        // fine in the parallel context; the row is returned and
+                        // collected by the caller (which holds &mut self).
+                        let detail = self.needs_strings().then(|| {
+                            self.pair_detail(
+                                locus,
+                                crc1,
+                                crc2,
+                                &seq1.sequence,
+                                &seq2.sequence,
+                                &traceback.query,
+                                &traceback.reference,
+                                (snps, indel_events, indel_bases),
+                                traceback.score,
+                            )
+                        });
 
-                                return Some((snps, indel_events, indel_bases, detail));
-                            }
-                            Err(_) => {
-                                // Traceback failed, use simple approach
-                                let (snps, indel_events, indel_bases) =
-                                    self.analyze_sequences(&seq1.sequence, &seq2.sequence);
-                                return Some((snps, indel_events, indel_bases, None));
-                            }
-                        }
+                        return Some((snps, indel_events, indel_bases, detail));
                     }
                     Err(_) => {
                         // Alignment failed, use simple comparison
@@ -2553,6 +2540,8 @@ pub fn calculate_distance_matrix(
 
 #[cfg(test)]
 mod tests {
+    // parasail-rs itself: the reference the C-API path is compared with
+    use parasail_rs::Aligner;
     use super::*;
     use crate::data::SequenceInfo;
 
@@ -2647,12 +2636,11 @@ mod tests {
     }
 
     fn fast(q: &[u8], r: &[u8]) -> (usize, usize, usize, i32, bool) {
-        let res = align_global_trace(&AlignmentConfig::default(), q, r)
+        let tb = align_global_trace(&AlignmentConfig::default(), q, r)
             .unwrap()
             .unwrap();
-        let tb = res.get_traceback_strings(q, r).unwrap();
         let (s, e, b) = compute_alignment_stats(&tb.query, &tb.reference);
-        (s, e, b, res.get_score(), res.is_saturated())
+        (s, e, b, tb.score, tb.saturated)
     }
 
     fn lcg_seq(seed: &mut u64, n: usize) -> Vec<u8> {
