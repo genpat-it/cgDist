@@ -334,7 +334,7 @@ fn build(a: Build) -> Result<(), String> {
             eprintln!("⚠️  {locus}: two different alleles share a CRC32; locus skipped");
             continue;
         }
-        let mut data = store.read_locus(&locus)?.unwrap_or_default();
+        let mut data = read_locus_or_rebuild(&store, &locus);
         // a store allele with this CRC32 but another sequence: its pairs
         // belong to a different allele; never mix them
         let clash = alleles.iter().find(|(crc, (_, seq))| {
@@ -428,6 +428,20 @@ fn build(a: Build) -> Result<(), String> {
     Ok(())
 }
 
+/// The locus as the store holds it, or empty (every pair recomputed) when
+/// its file does not match the manifest: a build interrupted after writing a
+/// locus file and before saving the manifest leaves exactly that, and
+/// recomputing is always safe.
+fn read_locus_or_rebuild(store: &Store, locus: &str) -> LocusData {
+    match store.read_locus(locus) {
+        Ok(d) => d.unwrap_or_default(),
+        Err(e) => {
+            eprintln!("⚠️  {locus}: {e}; the locus is rebuilt from scratch");
+            LocusData::default()
+        }
+    }
+}
+
 /// FASTA files of a schema directory, sorted.
 fn schema_files(dir: &str) -> Result<Vec<std::path::PathBuf>, String> {
     let mut files: Vec<_> = std::fs::read_dir(dir)
@@ -501,7 +515,7 @@ fn build_protein(a: Build) -> Result<(), String> {
             eprintln!("⚠️  {locus}: two different proteins share a CRC32; locus skipped");
             continue;
         }
-        let mut data = store.read_locus(&locus)?.unwrap_or_default();
+        let mut data = read_locus_or_rebuild(&store, &locus);
         let clash = proteins.iter().find(|(h, p)| {
             data.digests
                 .get(h)
