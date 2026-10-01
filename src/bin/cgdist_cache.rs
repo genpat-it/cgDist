@@ -908,6 +908,12 @@ fn info(a: Info) -> Result<(), String> {
         m.schema.source.as_deref().unwrap_or("-"),
         m.schema.version.as_deref().unwrap_or("-")
     );
+    if let Some(url) = m.schema.extra.get("url").and_then(|v| v.as_str()) {
+        println!("schema url   {url}");
+    }
+    if let Some(c) = m.schema.extra.get("citation").and_then(|v| v.as_str()) {
+        println!("cite schema  {c}");
+    }
     println!(
         "loci         {} ({complete} complete: every pair of their alleles)",
         m.loci.len()

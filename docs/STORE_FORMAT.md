@@ -58,6 +58,10 @@ start with `.`; the file of locus `L` is `loci/L.cgds`.
   only if these numbers, the hasher and (for protein stores) every protein
   setting are equal; readers must refuse a store whose parameters differ from
   the run's.
+* `schema` describes where the alleles come from and does not affect the
+  results. Besides `name`, `source` and `version` it may carry any other field,
+  e.g. `url`, `species_id`, `schema_id`, `nr_loci`, `nr_alleles`, `citation`;
+  tools keep these fields when they copy a manifest (`pull`, `pack`).
 * `genetic_code`, when present, is the code of the synonymous/nonsynonymous
   counts stored in the locus files.
 * Per locus: `alleles` and `pairs` are the counts in the locus file,

@@ -446,6 +446,10 @@ pub struct SchemaInfo {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Any other field (source URL, ids, citation, ...), kept as is so that
+    /// copying a manifest (`pull`, `pack`) preserves the provenance.
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -794,6 +798,18 @@ impl Drop for StoreLock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema_provenance_fields_survive_a_round_trip() {
+        let json = r#"{"name":"L. monocytogenes cgMLST","source":"chewie-ns","version":"v1",
+            "url":"https://chewbbaca.online/species/18/schemas/1","species_id":18,"citation":"Mamede et al."}"#;
+        let s: SchemaInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(s.name.as_deref(), Some("L. monocytogenes cgMLST"));
+        assert_eq!(s.extra["species_id"], serde_json::json!(18));
+        let back: SchemaInfo = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+        assert_eq!(serde_json::to_string(&SchemaInfo::default()).unwrap(), "{}");
+    }
 
     fn sample() -> LocusData {
         let mut d = LocusData::default();
