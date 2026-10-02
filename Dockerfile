@@ -36,15 +36,17 @@ RUN CPU="${RUST_TARGET_CPU}"; \
 FROM debian:bookworm-slim
 
 # Install only necessary runtime dependencies
-RUN apt-get update && apt-get install -y \
+# procps: `ps`, used by Nextflow to collect task metrics
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
 RUN useradd -r -s /bin/false cgdist
 
 # Copy compiled binaries (cgdist; cgdist-cache for cache stores; cgdist-diff
-# to inspect one allele pair: use --entrypoint to run the helpers)
+# to inspect one allele pair: `docker run IMAGE cgdist-cache ...`)
 COPY --from=builder /app/target/release/cgdist /usr/local/bin/cgdist
 COPY --from=builder /app/target/release/cgdist-cache /usr/local/bin/cgdist-cache
 COPY --from=builder /app/target/release/cgdist-diff /usr/local/bin/cgdist-diff
@@ -61,11 +63,11 @@ USER cgdist
 # Working directory for data
 WORKDIR /data
 
-# Entry point
-ENTRYPOINT ["/usr/local/bin/cgdist"]
-
-# Default help if no arguments are passed
-CMD ["--help"]
+# Entry point: options run cgdist (`docker run IMAGE --schema ...`); a command
+# runs that command (`docker run IMAGE cgdist-cache ...`, or the `/bin/bash`
+# of Nextflow and other workflow managers); no arguments shows cgdist --help
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Metadata
 LABEL maintainer="andrea.deruvo@gssi.it"

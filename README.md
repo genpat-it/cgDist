@@ -104,7 +104,7 @@ notice — existing scripts continue to work.
 To pin a specific published version:
 
 ```bash
-cargo install cgdist --version 0.2.0
+cargo install cgdist --version 0.2.1
 ```
 
 For a fully reproducible build that uses exactly the dependency
@@ -125,7 +125,7 @@ citing the manuscript:
 
 ```bash
 # Specific release tag
-cargo install --git https://github.com/genpat-it/cgDist --tag v0.2.0 cgdist
+cargo install --git https://github.com/genpat-it/cgDist --tag v0.2.1 cgdist
 
 # Latest state on the default branch
 cargo install --git https://github.com/genpat-it/cgDist cgdist
@@ -144,17 +144,26 @@ Container Registry on every release:
 
 ```bash
 # Pull the public image (no authentication required)
-docker pull ghcr.io/genpat-it/cgdist:0.2.0
+docker pull ghcr.io/genpat-it/cgdist:0.2.1
 # or pin to the minor / major series:
-# docker pull ghcr.io/genpat-it/cgdist:0.1
+# docker pull ghcr.io/genpat-it/cgdist:0.2
 # docker pull ghcr.io/genpat-it/cgdist:latest   # tracks master HEAD
 
 # Run with the image (mount your working directory at /data).
-# The image's ENTRYPOINT is `cgdist`, so flags are passed directly:
-docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.2.0 \
+# Options are passed to cgdist:
+docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.2.1 \
     --schema /data/schema_dir --profiles /data/profiles.tsv \
     --output /data/distances.tsv --mode snps-indel-bases
+
+# The other programs of the image run by name:
+docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.2.1 \
+    cgdist-cache pull --from <store URL> --out /data/store
 ```
+
+The image also works in Nextflow and other workflow managers, which run a
+shell in the container (`/bin/bash ...`), with no extra options. It runs as a
+non-root user: with Docker, set `docker.runOptions = '-u $(id -u):$(id -g)'`
+in `nextflow.config` so that it can write to the work directory.
 
 To build the image locally instead of pulling (useful for development):
 

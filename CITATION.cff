@@ -6,7 +6,7 @@ authors:
     affiliation: "Gran Sasso Science Institute"
     orcid: "https://orcid.org/0000-0001-6836-3455"
 title: "cgDist"
-version: "0.2.0"
+version: "0.2.1"
 date-released: 2026-10-02
 license: MIT
 type: software

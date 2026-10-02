@@ -8,6 +8,22 @@ until the API stabilizes).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-02
+
+### Fixed
+
+- Docker image: it now works in Nextflow and other workflow managers without
+  `--entrypoint ""`. The entry point runs cgdist when the first argument is
+  an option (`docker run IMAGE --schema ...`, as before) and the given
+  program otherwise (`docker run IMAGE cgdist-cache pull ...`, or the
+  `/bin/bash` that workflow managers run); with no arguments it shows
+  `cgdist --help`. The image also ships `ps` (procps), which Nextflow uses
+  for task metrics.
+- `Cargo.lock`: `yoke-derive` 0.8.3, yanked from crates.io, updated to 0.8.4.
+
+No change to cgdist, cgdist-cache or cgdist-diff: outputs are identical to
+0.2.0.
+
 ## [0.2.0] — 2026-10-02
 
 ### Highlights
@@ -443,7 +459,8 @@ on use.
 Initial public release accompanying the bioRxiv preprint
 (DOI: [10.1101/2025.10.16.682749](https://doi.org/10.1101/2025.10.16.682749)).
 
-[Unreleased]: https://github.com/genpat-it/cgDist/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/genpat-it/cgDist/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/genpat-it/cgDist/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/genpat-it/cgDist/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/genpat-it/cgDist/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/genpat-it/cgDist/compare/v0.1.2...v0.1.3
