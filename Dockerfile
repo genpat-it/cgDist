@@ -19,11 +19,18 @@ COPY src/ ./src/
 
 # Compile in release mode. The image runs on machines other than the one that
 # builds it, so no target-cpu=native (an image built on a newer CPU would stop
-# with "illegal instruction" on an older one): x86-64-v2 (SSE4.2) runs on every
-# x86-64 server of the last 15 years; parasail picks its SIMD kernels at run
-# time. For the fastest local build use RUSTFLAGS="-C target-cpu=native".
-ARG RUST_TARGET_CPU=x86-64-v2
-RUN RUSTFLAGS="-C target-cpu=${RUST_TARGET_CPU}" cargo build --release
+# with "illegal instruction" on an older one): on amd64 x86-64-v2 (SSE4.2)
+# runs on every x86-64 server of the last 15 years; on arm64 the default
+# target (NEON) is kept. parasail picks its SIMD kernels at run time. For the
+# fastest local build use RUSTFLAGS="-C target-cpu=native".
+# TARGETARCH is set by docker buildx (amd64, arm64); RUST_TARGET_CPU overrides.
+ARG TARGETARCH
+ARG RUST_TARGET_CPU=
+RUN CPU="${RUST_TARGET_CPU}"; \
+    if [ -z "$CPU" ] && [ "${TARGETARCH:-amd64}" = "amd64" ]; then CPU=x86-64-v2; fi; \
+    if [ -n "$CPU" ]; then export RUSTFLAGS="-C target-cpu=$CPU"; fi; \
+    echo "RUSTFLAGS=${RUSTFLAGS:-<default>}"; \
+    cargo build --release
 
 # Final stage with smaller image
 FROM debian:bookworm-slim
