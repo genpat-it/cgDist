@@ -104,7 +104,7 @@ notice — existing scripts continue to work.
 To pin a specific published version:
 
 ```bash
-cargo install cgdist --version 0.1.4
+cargo install cgdist --version 0.2.0
 ```
 
 For a fully reproducible build that uses exactly the dependency
@@ -125,7 +125,7 @@ citing the manuscript:
 
 ```bash
 # Specific release tag
-cargo install --git https://github.com/genpat-it/cgDist --tag v0.1.4 cgdist
+cargo install --git https://github.com/genpat-it/cgDist --tag v0.2.0 cgdist
 
 # Latest state on the default branch
 cargo install --git https://github.com/genpat-it/cgDist cgdist
@@ -144,14 +144,14 @@ Container Registry on every release:
 
 ```bash
 # Pull the public image (no authentication required)
-docker pull ghcr.io/genpat-it/cgdist:0.1.4
+docker pull ghcr.io/genpat-it/cgdist:0.2.0
 # or pin to the minor / major series:
 # docker pull ghcr.io/genpat-it/cgdist:0.1
 # docker pull ghcr.io/genpat-it/cgdist:latest   # tracks master HEAD
 
 # Run with the image (mount your working directory at /data).
 # The image's ENTRYPOINT is `cgdist`, so flags are passed directly:
-docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.1.4 \
+docker run --rm -v $(pwd):/data ghcr.io/genpat-it/cgdist:0.2.0 \
     --schema /data/schema_dir --profiles /data/profiles.tsv \
     --output /data/distances.tsv --mode snps-indel-bases
 ```

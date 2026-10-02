@@ -35,7 +35,7 @@ start with `.`; the file of locus `L` is `loci/L.cgds`.
   "genetic_code": {"table": 11, "first_codon_as_met": true},
   "schema": {"name": "...", "source": "chewie-ns", "version": "..."},
   "note": "...",
-  "cgdist_version": "0.1.4",
+  "cgdist_version": "0.2.0",
   "created": "2026-09-29T14:43:04Z",
   "last_modified": "2026-09-29T15:22:41Z",
   "loci": {
