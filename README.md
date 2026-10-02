@@ -651,9 +651,12 @@ library only) and `scripts/test_store_format.py` checks it against cgdist.
 
 Pairs involving alleles that are not in a store (e.g. alleles inferred by
 chewBBACA in your samples) are aligned from `--schema` and kept in
-`--cache-dir`. Give cgdist the schema folder used for allele calling;
-`--fail-on-unaligned` stops the run if a pair cannot be aligned instead of
-counting it as 0. Locus files record a digest of every allele sequence, so an
+`--cache-dir`. Give cgdist the schema folder used for allele calling: if a
+pair cannot be aligned (an allele of the profiles is missing from the
+schema) cgdist stops with an error and writes no distances, since such a
+pair would count as 0 and undercount the distance (the pairs aligned so far
+are still saved to the cache). `--allow-unaligned` writes the distances
+anyway, as cgdist 0.1.x did. Locus files record a digest of every allele sequence, so an
 allele with the same CRC32 as a different store allele is never taken from
 the store. `cgdist-cache pull` merges downloaded loci with local pairs, and
 `cgdist-cache build --schema <your schema> --out <pulled store>` adds only the

@@ -33,6 +33,9 @@ pub struct ValidationResult {
 
 /// Validate all command line arguments
 pub fn validate_args(args: &Args) -> Result<ValidationResult, String> {
+    if args.allow_unaligned && args.fail_on_unaligned {
+        return Err("--allow-unaligned and --fail-on-unaligned contradict each other".to_string());
+    }
     // Validate hasher type
     let registry = HasherRegistry::new();
     if !registry.has_hasher(&args.hasher_type) {

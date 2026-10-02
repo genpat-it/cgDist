@@ -177,6 +177,12 @@ impl Args {
         if !self.fail_on_unaligned {
             self.fail_on_unaligned = config.fail_on_unaligned.unwrap_or(false);
         }
+        // the CLI flags win; in the config, allow_unaligned = true or
+        // fail_on_unaligned = false keeps the 0.1.x behaviour
+        if !self.allow_unaligned && !self.fail_on_unaligned {
+            self.allow_unaligned =
+                config.allow_unaligned.unwrap_or(false) || config.fail_on_unaligned == Some(false);
+        }
         if self.protein_cache_file.is_none() {
             self.protein_cache_file = config.protein_cache_file;
         }

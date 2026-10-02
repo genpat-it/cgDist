@@ -133,6 +133,30 @@ def main():
            ["--mode", "snps-indel-bases", "--alignment-mode", "custom",
             "--match-score", "2", "--mismatch-penalty", "-1",
             "--gap-open", "6", "--gap-extend", "1", "--hasher-type", "crc32"])
+        # An allele of the profiles missing from the schema (cannot be aligned):
+        # an error by default (0.2.0), distances only with --allow-unaligned.
+        novel = os.path.join(d, "profiles_novel_allele.tsv")
+        with open(PROFILES) as src, open(novel, "w") as dst:
+            for i, line in enumerate(src):
+                cols = line.rstrip("\n").split("\t")
+                if i == 1:
+                    cols[1] = "12345"  # not the CRC32 of any allele of locus1
+                dst.write("\t".join(cols) + "\n")
+        unal_out = os.path.join(d, "unaligned_default.tsv")
+        run_case("allele missing from schema -> error, no matrix",
+                 [CGDIST, "--schema", SCHEMA, "--profiles", novel, "--output", unal_out,
+                  "--mode", "snps-indel-bases"], expect_rc=1)
+        if os.path.exists(unal_out):
+            results.append(("allele missing from schema -> no matrix file", False, "matrix written"))
+        run_case("allele missing from schema + --allow-unaligned",
+                 [CGDIST, "--schema", SCHEMA, "--profiles", novel, "--mode", "snps-indel-bases",
+                  "--output", os.path.join(d, "unaligned_allowed.tsv"), "--allow-unaligned"],
+                 expect_file=os.path.join(d, "unaligned_allowed.tsv"))
+        run_case("--allow-unaligned with --fail-on-unaligned -> clean error",
+                 [CGDIST, "--schema", SCHEMA, "--profiles", PROFILES,
+                  "--output", os.path.join(d, "both.tsv"), "--allow-unaligned", "--fail-on-unaligned"],
+                 expect_rc=1)
+
         # Friendly validation: wrong-sign custom scores must error cleanly, not abort.
         run_case("custom scores wrong sign -> clean error",
                  [CGDIST, "--schema", SCHEMA, "--profiles", PROFILES,

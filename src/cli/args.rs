@@ -186,11 +186,18 @@ pub struct Args {
     #[argh(option, default = "1")]
     pub aa_gap_extend: i32,
 
-    /// stop with an error if any allele pair cannot be aligned (e.g. an
-    /// allele of the profiles missing from --schema), instead of warning and
-    /// counting it as 0; recommended for surveillance
+    /// stop with an error if an allele pair cannot be aligned (an allele of
+    /// the profiles missing from --schema): the default since 0.2.0, the flag
+    /// is accepted for compatibility
     #[argh(switch)]
     pub fail_on_unaligned: bool,
+
+    /// write distances even if some allele pairs cannot be aligned (an
+    /// allele of the profiles missing from --schema): such pairs count as 0
+    /// (1 in snps mode with --hamming-fallback), which undercounts
+    /// differences; the 0.1.x behaviour. Default: stop with an error
+    #[argh(switch)]
+    pub allow_unaligned: bool,
 
     /// protein-level cache file (.lz4) for aa-* modes and aa_* weights
     #[argh(option)]

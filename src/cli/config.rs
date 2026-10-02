@@ -67,6 +67,7 @@ pub struct Config {
     pub aa_gap_extend: Option<i32>,
     pub protein_cache_file: Option<String>,
     pub fail_on_unaligned: Option<bool>,
+    pub allow_unaligned: Option<bool>,
     pub protein_cache_dir: Option<String>,
     pub protein_cache_layer: Option<Vec<String>>,
 }
@@ -119,6 +120,7 @@ impl Config {
             aa_gap_extend: None,
             protein_cache_file: None,
             fail_on_unaligned: None,
+            allow_unaligned: None,
             protein_cache_dir: None,
             protein_cache_layer: None,
         }
@@ -297,8 +299,9 @@ dry_run = false
 # no_first_codon_as_met = false
 # coding_stats = false
 
-# Stop with an error if any allele pair cannot be aligned (surveillance)
-# fail_on_unaligned = false
+# An allele pair that cannot be aligned (an allele missing from the schema)
+# stops the run; true writes the distances anyway, counting it as 0 (0.1.x)
+# allow_unaligned = false
 
 # Protein-level modes (aa-hamming, aa-substitutions, ...)
 # aa_matrix = "blosum62"

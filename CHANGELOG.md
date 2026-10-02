@@ -18,7 +18,9 @@ until the API stabilizes).
 - New distances: synonymous/nonsynonymous, custom weightings, protein-level
   modes; `cgdist-diff` shows the SNPs and InDels of one allele pair.
 - Compatibility: every distance mode of 0.1.4 gives byte-identical matrices,
-  and caches (`.lz4`) are read in both directions (see below).
+  and caches (`.lz4`) are read in both directions (see below). One breaking
+  change: allele pairs that cannot be aligned stop the run unless
+  `--allow-unaligned`.
 
 ### Added
 
@@ -121,15 +123,22 @@ until the API stabilizes).
   (pairs from both are kept; conflicting statistics are refused) instead of
   replacing it, so updating from a catalog keeps the pairs a site computed
   for its own new alleles.
-- `--fail-on-unaligned`: stop with an error if an allele pair cannot be
-  aligned (an allele of the profiles missing from `--schema`) instead of
-  warning and counting it as 0; recommended for surveillance.
+- `--allow-unaligned`: write the distances even if some allele pairs
+  cannot be aligned, counting them as 0 (the 0.1.x behaviour; see Changed).
 - The `schema` section of a store manifest may carry provenance fields (URL,
   ids, citation, ...); they are kept through `pull` and `pack`, and
   `cgdist-cache info` shows the schema URL and citation.
 
 ### Changed
 
+- **Breaking:** an allele pair that cannot be aligned (an allele of the
+  profiles missing from `--schema`) now stops the run with an error and no
+  distances are written. Up to 0.1.4 such a pair was counted as 0 with a
+  warning, which silently undercounts distances (e.g. a surveillance run
+  given an outdated schema). The pairs aligned so far are still saved to the
+  cache and stores. `--allow-unaligned` (or `allow_unaligned = true` in the
+  config) restores the old behaviour; `--fail-on-unaligned` is accepted and
+  is now the default.
 - Linux builds use the mimalloc allocator: glibc's malloc serialised the
   per-pair allocations of the traceback paths (`--coding-stats`,
   `nonsyn-snps`, `--save-alignments`, `--save-cigar`) under many threads,
@@ -203,8 +212,9 @@ until the API stabilizes).
   with and without a cache; csv/phylip/nexus; `--emit-pairs`/`--report-ci`;
   sample and locus filters; Hamming fallback on/off; custom scoring; 1 vs 36
   threads; `--save-alignments`) are byte-identical apart from the command and
-  time header lines. A `.lz4` cache written by 0.1.4 gives the same matrices
-  with this version, and the reverse.
+  time header lines (the profiles include alleles missing from the schema,
+  so this version runs with `--allow-unaligned`). A `.lz4` cache written
+  by 0.1.4 gives the same matrices with this version, and the reverse.
 - Stores (`cgdist-cache`, `--cache-dir`, `--cache-layer`, protein stores) are
   new and need this version.
 
