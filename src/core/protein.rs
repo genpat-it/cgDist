@@ -96,7 +96,9 @@ impl GeneticCode {
 
     /// Protein of a coding sequence; a trailing incomplete codon is ignored.
     pub fn translate(&self, cds: &[u8]) -> Vec<u8> {
-        cds.chunks_exact(3)
+        cds.as_chunks::<3>()
+            .0
+            .iter()
             .enumerate()
             .map(|(i, c)| self.translate_codon(c, i == 0))
             .collect()

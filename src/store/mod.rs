@@ -376,8 +376,8 @@ pub fn decode_with_digests(
             .ok_or("corrupt locus file: truncated digests")?;
         let digests: Vec<(u32, u64)> = alleles
             .iter()
-            .zip(tail.chunks_exact(8))
-            .map(|(&(c, _), b)| (c, u64::from_le_bytes(b.try_into().unwrap())))
+            .zip(tail.as_chunks::<8>().0)
+            .map(|(&(c, _), b)| (c, u64::from_le_bytes(*b)))
             .collect();
         r.pos += need;
         on_digests(&digests);
