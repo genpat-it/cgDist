@@ -1,5 +1,5 @@
 # Multi-stage build to optimize final image size
-FROM rust:1.95 as builder
+FROM rust:1.95 AS builder
 
 # Install system dependencies required for compilation
 RUN apt-get update && apt-get install -y \
@@ -17,8 +17,13 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 
-# Compile in release mode with native optimizations
-RUN RUSTFLAGS="-C target-cpu=native" cargo build --release
+# Compile in release mode. The image runs on machines other than the one that
+# builds it, so no target-cpu=native (an image built on a newer CPU would stop
+# with "illegal instruction" on an older one): x86-64-v2 (SSE4.2) runs on every
+# x86-64 server of the last 15 years; parasail picks its SIMD kernels at run
+# time. For the fastest local build use RUSTFLAGS="-C target-cpu=native".
+ARG RUST_TARGET_CPU=x86-64-v2
+RUN RUSTFLAGS="-C target-cpu=${RUST_TARGET_CPU}" cargo build --release
 
 # Final stage with smaller image
 FROM debian:bookworm-slim

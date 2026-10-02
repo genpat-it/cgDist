@@ -8,31 +8,20 @@ until the API stabilizes).
 
 ## [Unreleased]
 
-### Changed (portal work)
-- Linux builds use the mimalloc allocator: glibc's malloc serialised the
-  per-pair allocations of the traceback paths (`--coding-stats`,
-  `nonsyn-snps`, `--save-alignments`, `--save-cigar`) under many threads,
-  5-10x slower at 16-32 threads. Output is byte-identical.
-- `--cache-only` also accepts `--cache-dir` (it required `--cache-file`).
-- Certified banded aligner: on long, divergent alleles (heavy wgMLST loci)
-  the single-gap lower bound asks for a band too wide, and 88% of such pairs
-  fell back to parasail. It now aligns in a narrow probe band first and uses
-  that score (a real alignment, hence a lower bound) to size the certified
-  band; the band may cover the whole matrix before parasail is used
-  (cheaper than parasail's traceback kernel). Same certificate, so results
-  are unchanged: identical stores on 300 Listeria loci (3 presets) and on
-  the 24 heaviest S. pneumoniae loci (2.6x faster there), 0 differences in
-  200,000 adversarial fuzz cases and 1,800 long divergent pairs.
-- Alignments with traceback (protein pairs, the parasail fallback and the
-  reference kernel of `--verify-alignments` / `verify --realign`) call
-  parasail's C API directly (`core::parasail_trace`) instead of
-  parasail-rs's `get_traceback_strings`, which frees C-allocated strings
-  with Rust's allocator and leaks ~32 bytes per call (reported upstream:
-  nsbuitrago/parasail-rs#23). Same kernels, matrices and gap penalties:
-  output byte-identical; protein builds no longer grow in memory.
-- `--mode` and `--weights` help list every mode and key.
+### Highlights
 
-### Added (protein stores)
+- Alignments 10-30x faster with bit-identical results (certified banded
+  aligner, proof in `docs/BANDED_ALIGNMENT_PROOF.md`).
+- Distributable cache stores (`cgdist-cache`): precompute every allele pair
+  of a schema once, share it as a `.cgpack`, read it locally or over HTTP;
+  DNA and protein stores, robust to new alleles.
+- New distances: synonymous/nonsynonymous, custom weightings, protein-level
+  modes; `cgdist-diff` shows the SNPs and InDels of one allele pair.
+- Compatibility: every distance mode of 0.1.4 gives byte-identical matrices,
+  and caches (`.lz4`) are read in both directions (see below).
+
+### Added
+
 - Protein cache stores: `cgdist-cache build --protein` precomputes every
   pair of distinct proteins of a schema (genetic code, matrix and gap
   penalties recorded in the manifest). cgdist reads them with
@@ -45,50 +34,6 @@ until the API stabilizes).
   pairs by translating and aligning again.
 - `cgdist-cache stats` writes per-locus summaries and pair histograms (JSON).
 - Built-in substitution matrix names are case-insensitive.
-
-### Changed
-
-- Alignments are much faster with bit-identical results. A pair is first
-  aligned with a certified banded aligner (`src/core/banded.rs`): it fills
-  only a diagonal band of the DP matrix, reproduces parasail's recurrences,
-  tie-breaking and traceback, and returns a result only when a band
-  certificate proves it equals the full-matrix result. Otherwise the pair is
-  aligned by parasail as before, now with the scan kernel at 16-bit
-  precision (escalating to 32/64-bit on saturation) and per-thread aligners
-  instead of the slower striped kernel. The proof, the invariants and the
-  verification (exhaustive over all short sequences, 739,554 real allele
-  pairs, adversarial fuzzing: no differences) are in
-  `docs/BANDED_ALIGNMENT_PROOF.md`. Distance matrices and cache statistics
-  are identical to 0.1.4.
-
-- A cache no longer goes through a separate enrichment pass after saving
-  when every entry already has its allele lengths: newly aligned pairs record
-  both lengths at alignment time, which avoids re-reading the whole schema.
-  Cold runs with `--cache-file` (16 threads): 72 s -> 2.1 s
-  (L. monocytogenes, 300 samples), 153 s -> 3.9 s (S. enterica, 120 samples);
-  the alignment step itself is 120-140x faster per pair.
-
-- `--save-alignments` uses the certified banded alignment too: it writes the
-  same gapped strings as parasail, and the file content is byte-identical to
-  0.1.4. Rows are now written as they are produced instead of being held in
-  memory until the end: peak memory 2.9 GB -> 0.5 GB (L. monocytogenes, 300
-  samples) and 5.5 GB -> 1.3 GB (S. enterica, 120 samples); run time
-  72 s -> 2.4 s and 153 s -> 4.7 s.
-
-### Fixed
-
-- `--save-alignments` was silently ignored with `--cache-only`; the file is
-  now written in that mode too.
-- Cache enrichment looked up allele lengths in one CRC32 map for the whole
-  schema. CRC32 values collide across loci of large schemas (906 colliding
-  CRCs with different lengths in the S. enterica schema), so some entries
-  received the length of another locus' allele, depending on file order.
-  Lengths are now always taken per locus (215 affected entries in the 120
-  sample S. enterica test set; distances were never affected, only
-  recombination densities).
-
-### Added
-
 - `--save-cigar <file>`: one compact row per aligned pair (locus, hash1,
   hash2, CIGAR, snps, indel_events, indel_bases, alignment_score). The
   extended CIGAR (`=`, `X`, `I`, `D`) gives the position of every SNP and
@@ -165,6 +110,103 @@ until the API stabilizes).
 - `--verify-alignments <fraction>`: re-check a deterministic fraction of new
   alignments against parasail's original kernel and stop with an error on
   any difference (`1` = every pair).
+- Cache stores robust to new alleles (surveillance): locus files (format
+  version 2) store an 8-byte SHA-256 digest of every allele, so an allele of
+  a run whose CRC32 equals a stored allele's but whose sequence differs is
+  detected and realigned instead of silently reusing the stored pair
+  (forged-collision test: v2 store correct, v1 store wrong). Readers accept
+  version 1 files. The format is specified in `docs/STORE_FORMAT.md`, with an
+  independent Python reader (`scripts/cgds_reader.py`).
+- `cgdist-cache pull` merges each downloaded locus with the local one
+  (pairs from both are kept; conflicting statistics are refused) instead of
+  replacing it, so updating from a catalog keeps the pairs a site computed
+  for its own new alleles.
+- `--fail-on-unaligned`: stop with an error if an allele pair cannot be
+  aligned (an allele of the profiles missing from `--schema`) instead of
+  warning and counting it as 0; recommended for surveillance.
+- The `schema` section of a store manifest may carry provenance fields (URL,
+  ids, citation, ...); they are kept through `pull` and `pack`, and
+  `cgdist-cache info` shows the schema URL and citation.
+
+### Changed
+
+- Linux builds use the mimalloc allocator: glibc's malloc serialised the
+  per-pair allocations of the traceback paths (`--coding-stats`,
+  `nonsyn-snps`, `--save-alignments`, `--save-cigar`) under many threads,
+  5-10x slower at 16-32 threads. Output is byte-identical.
+- `--cache-only` also accepts `--cache-dir` (it required `--cache-file`).
+- Certified banded aligner: on long, divergent alleles (heavy wgMLST loci)
+  the single-gap lower bound asks for a band too wide, and 88% of such pairs
+  fell back to parasail. It now aligns in a narrow probe band first and uses
+  that score (a real alignment, hence a lower bound) to size the certified
+  band; the band may cover the whole matrix before parasail is used
+  (cheaper than parasail's traceback kernel). Same certificate, so results
+  are unchanged: identical stores on 300 Listeria loci (3 presets) and on
+  the 24 heaviest S. pneumoniae loci (2.6x faster there), 0 differences in
+  200,000 adversarial fuzz cases and 1,800 long divergent pairs.
+- Alignments with traceback (protein pairs, the parasail fallback and the
+  reference kernel of `--verify-alignments` / `verify --realign`) call
+  parasail's C API directly (`core::parasail_trace`) instead of
+  parasail-rs's `get_traceback_strings`, which frees C-allocated strings
+  with Rust's allocator and leaks ~32 bytes per call (reported upstream:
+  nsbuitrago/parasail-rs#23). Same kernels, matrices and gap penalties:
+  output byte-identical; protein builds no longer grow in memory.
+- `--mode` and `--weights` help list every mode and key.
+- Alignments are much faster with bit-identical results. A pair is first
+  aligned with a certified banded aligner (`src/core/banded.rs`): it fills
+  only a diagonal band of the DP matrix, reproduces parasail's recurrences,
+  tie-breaking and traceback, and returns a result only when a band
+  certificate proves it equals the full-matrix result. Otherwise the pair is
+  aligned by parasail as before, now with the scan kernel at 16-bit
+  precision (escalating to 32/64-bit on saturation) and per-thread aligners
+  instead of the slower striped kernel. The proof, the invariants and the
+  verification (exhaustive over all short sequences, 739,554 real allele
+  pairs, adversarial fuzzing: no differences) are in
+  `docs/BANDED_ALIGNMENT_PROOF.md`. Distance matrices and cache statistics
+  are identical to 0.1.4.
+- A cache no longer goes through a separate enrichment pass after saving
+  when every entry already has its allele lengths: newly aligned pairs record
+  both lengths at alignment time, which avoids re-reading the whole schema.
+  Cold runs with `--cache-file` (16 threads): 72 s -> 2.1 s
+  (L. monocytogenes, 300 samples), 153 s -> 3.9 s (S. enterica, 120 samples);
+  the alignment step itself is 120-140x faster per pair.
+- `--save-alignments` uses the certified banded alignment too: it writes the
+  same gapped strings as parasail, and the file content is byte-identical to
+  0.1.4. Rows are now written as they are produced instead of being held in
+  memory until the end: peak memory 2.9 GB -> 0.5 GB (L. monocytogenes, 300
+  samples) and 5.5 GB -> 1.3 GB (S. enterica, 120 samples); run time
+  72 s -> 2.4 s and 153 s -> 4.7 s.
+- The Docker image is built for `x86-64-v2` instead of the build machine's
+  CPU (`target-cpu=native`), so it runs on any x86-64 server of the last 15
+  years (an image built on a newer CPU could stop with "illegal
+  instruction"); output identical to the native build.
+
+### Fixed
+
+- `--save-alignments` was silently ignored with `--cache-only`; the file is
+  now written in that mode too.
+- Cache enrichment looked up allele lengths in one CRC32 map for the whole
+  schema. CRC32 values collide across loci of large schemas (906 colliding
+  CRCs with different lengths in the S. enterica schema), so some entries
+  received the length of another locus' allele, depending on file order.
+  Lengths are now always taken per locus (215 affected entries in the 120
+  sample S. enterica test set; distances were never affected, only
+  recombination densities).
+- `cgdist-cache build` rebuilds a locus whose file does not match the
+  manifest (an interrupted run) instead of stopping with a checksum error.
+
+### Compatibility
+
+- Regression against 0.1.4 on four Chewie-NS schemas (L. monocytogenes
+  cgMLST, S. enterica and S. pneumoniae wgMLST, N. meningitidis) and
+  Y. pestis: 90 outputs (every 0.1.4 distance mode x the three DNA presets,
+  with and without a cache; csv/phylip/nexus; `--emit-pairs`/`--report-ci`;
+  sample and locus filters; Hamming fallback on/off; custom scoring; 1 vs 36
+  threads; `--save-alignments`) are byte-identical apart from the command and
+  time header lines. A `.lz4` cache written by 0.1.4 gives the same matrices
+  with this version, and the reverse.
+- Stores (`cgdist-cache`, `--cache-dir`, `--cache-layer`, protein stores) are
+  new and need this version.
 
 ## [0.1.4] — 2026-09-29
 
